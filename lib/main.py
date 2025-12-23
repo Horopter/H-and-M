@@ -46,13 +46,17 @@ def train_pipeline(config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, An
     
     try:
         mlflow_tracker = MLFlowTracker(config, experiment_name="main_experiment")
-    except Exception:
-        pass
+    except (ImportError, AttributeError, ValueError) as e:
+        logger.debug(f"MLFlow tracker not available: {e}")
+    except Exception as e:
+        logger.warning(f"Could not initialize MLFlow tracker: {e}")
     
     try:
         duckdb_reporter = DuckDBReporter(config)
-    except Exception:
-        pass
+    except (ImportError, AttributeError, ValueError) as e:
+        logger.debug(f"DuckDB reporter not available: {e}")
+    except Exception as e:
+        logger.warning(f"Could not initialize DuckDB reporter: {e}")
     
     # Run all stages
     results = pipeline.run_all_stages(

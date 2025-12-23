@@ -251,7 +251,12 @@ Q3: {np.percentile(lengths, 75):.2f}"""
                                top_n: int = 20, save_path: Optional[str] = None):
         """Plot feature importance."""
         # Get top N features
-        top_indices = np.argsort(importances)[-top_n:][::-1]
+        if len(importances) == 0:
+            self.logger.warning("No importances provided")
+            return
+        
+        n_features = min(top_n, len(importances))
+        top_indices = np.argsort(importances)[-n_features:][::-1]
         top_importances = importances[top_indices]
         
         if feature_names:

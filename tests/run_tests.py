@@ -19,6 +19,11 @@ def run_all_tests():
     
     # Add test modules
     test_modules = [
+        'tests.test_constants',
+        'tests.test_message_loader',
+        'tests.test_chunked_processing',
+        'tests.test_config_constants_integration',
+        'tests.test_error_handling',
         'tests.test_data_loader',
         'tests.test_cv_stratified',
         'tests.test_gpu_fallback',

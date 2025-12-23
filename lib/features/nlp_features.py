@@ -8,7 +8,7 @@ import gzip
 import io
 from typing import List, Dict, Any, Optional
 import numpy as np
-from scipy.sparse import csr_matrix, hstack
+from scipy.sparse import csr_matrix, hstack, vstack
 
 try:
     from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
@@ -322,28 +322,43 @@ class NLPFeatureExtractor:
     def extract_tfidf_features(
         self,
         texts: List[str],
-        fit: bool = True
+        fit: bool = True,
+        chunk_size: Optional[int] = None
     ) -> csr_matrix:
         """
-        Extract TF-IDF features.
+        Extract TF-IDF features with chunked processing.
         
         Args:
             texts: List of text strings
             fit: Whether to fit the vectorizers
+            chunk_size: Process in chunks (None uses config default)
             
         Returns:
             Sparse matrix of TF-IDF features
         """
         self.logger.debug("Extracting TF-IDF features")
         
+        if chunk_size is None:
+            from ..constants import DEFAULT_CHUNK_SIZE
+            chunk_size = getattr(self.config, 'chunk_size', DEFAULT_CHUNK_SIZE) if hasattr(self, 'config') else DEFAULT_CHUNK_SIZE
+        
         if fit:
             word_features = self.word_tfidf.fit_transform(texts)
             char_features = self.char_tfidf.fit_transform(texts)
         else:
-            word_features = self.word_tfidf.transform(texts)
-            char_features = self.char_tfidf.transform(texts)
+            if len(texts) > chunk_size:
+                word_chunks = []
+                char_chunks = []
+                for i in range(0, len(texts), chunk_size):
+                    chunk_texts = texts[i:i+chunk_size]
+                    word_chunks.append(self.word_tfidf.transform(chunk_texts))
+                    char_chunks.append(self.char_tfidf.transform(chunk_texts))
+                word_features = vstack(word_chunks)
+                char_features = vstack(char_chunks)
+            else:
+                word_features = self.word_tfidf.transform(texts)
+                char_features = self.char_tfidf.transform(texts)
         
-        # Combine word and char features
         combined = hstack([word_features, char_features])
         return combined
     

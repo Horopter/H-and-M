@@ -22,7 +22,7 @@ module purge
 module load python3.11-anaconda/2024.02
 
 # Get project directory
-PROJECT_DIR="${SLURM_SUBMIT_DIR:-$HOME/Kaggle_1}"
+PROJECT_DIR="${SLURM_SUBMIT_DIR:-/scratch/si670f25_class_root/si670f25_class/santoshd/Kaggle1}"
 cd "$PROJECT_DIR" || {
     echo "ERROR: Cannot cd to $PROJECT_DIR"
     exit 1
@@ -58,6 +58,14 @@ else
     echo "✓ Created and activated virtual environment"
 fi
 
+# Upgrade pip to latest version
+echo ""
+echo "Upgrading pip..."
+python3 -m pip install --upgrade pip --quiet || {
+    echo "⚠ Warning: pip upgrade failed, continuing with current version"
+}
+pip --version
+
 # Function to install with logging
 install_package() {
     local file=$1
@@ -71,7 +79,7 @@ install_package() {
         return 0
     fi
     
-    if pip install --no-cache-dir --no-build-isolation -r "$file" 2>&1 | tee -a "$PROJECT_DIR/logs/install_large.log"; then
+    if pip install --no-cache-dir -r "$file" 2>&1 | tee -a "$PROJECT_DIR/logs/install_large.log"; then
         echo "✓ Successfully installed $name"
         return 0
     else

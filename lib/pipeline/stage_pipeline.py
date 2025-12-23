@@ -4,7 +4,7 @@ Stages: Exploratory -> Statistical -> Feature Engineering -> RFE -> Training (30
 """
 import numpy as np
 from typing import Dict, List, Any, Optional, Tuple
-from scipy.sparse import csr_matrix
+from scipy.sparse import csr_matrix, vstack
 from pathlib import Path
 import polars as pl
 import json
@@ -13,18 +13,14 @@ import shutil
 from ..config import get_config
 from ..logging.logger import get_logger
 from ..data.loader import DataLoader
-from ..data.splitter import TemporalSplitter
 from ..features.nlp_features import NLPFeatureExtractor
 from ..features.embeddings import EmbeddingExtractor
-from ..features.encodings import EncodingPipeline
 from ..features.feature_union import FeatureUnion
 from ..data.preprocessing_pipeline import PreprocessingPipeline
 from ..training.cv import CrossValidator
 from ..training.grid_search import GridSearch
-from ..training.trainer import Trainer
 from ..checkpointing.checkpoint_manager import CheckpointManager
 from ..checkpointing.state_manager import StateManager
-from ..utils.validation import LeakageDetector
 from ..training.mlflow_tracker import MLFlowTracker
 from ..utils.duckdb_reporter import DuckDBReporter
 from ..utils.stats_analysis import StatisticalAnalyzer
@@ -33,6 +29,7 @@ from ..utils.rfe import RecursiveFeatureElimination
 from ..utils.visualization import Visualizer
 from ..utils.arrow_storage import ArrowStorage
 from ..utils.submission import SubmissionGenerator
+from ..utils.gc_utils import collect_after_chunk
 
 logger = get_logger(__name__)
 
@@ -52,9 +49,7 @@ class StagePipeline:
         
         # Initialize components
         self.data_loader = DataLoader(config)
-        self.splitter = TemporalSplitter(config)
-        # DataSplitter not needed - we use provided train/val/test files
-        self.leakage_detector = LeakageDetector(config)
+        # Note: splitter, leakage_detector, encoding_pipeline not used - using provided train/val/test files
         self.checkpoint_manager = CheckpointManager(config)
         self.state_manager = StateManager(config)
         self.cv = CrossValidator(config)
@@ -63,7 +58,6 @@ class StagePipeline:
         # Feature extractors (will be fitted once and cached)
         self.nlp_extractor = NLPFeatureExtractor(config)
         self.embedding_extractor = EmbeddingExtractor(config)
-        self.encoding_pipeline = EncodingPipeline()
         self.feature_union = FeatureUnion(config)
         
         # Analysis tools
@@ -138,16 +132,54 @@ class StagePipeline:
             self.logger.info("Using cached features")
             return self.feature_cache[cache_key]
         
-        # Get texts
+        # Get texts (process in chunks to save memory)
+        chunk_size = self.config.chunk_size
         train_texts = train_df[self.config.text_column].to_list()
         val_texts = val_df[self.config.text_column].to_list()
         test_texts = test_df[self.config.text_column].to_list() if test_df is not None else None
         
-        # NLP features (fit once on train, transform on all)
+        # NLP features (fit once on train, transform on all with chunking)
         self.logger.info("Extracting NLP features...")
         train_nlp = self.nlp_extractor.extract_all_features(train_texts, fit=True)
-        val_nlp = self.nlp_extractor.transform(val_texts)
-        test_nlp = self.nlp_extractor.transform(test_texts) if test_texts else None
+        
+        # Checkpoint NLP features
+        self.arrow_storage.save_sparse_matrix(train_nlp, "train_nlp_checkpoint", "stage_3")
+        
+        if len(val_texts) > chunk_size:
+            val_chunks = []
+            for i in range(0, len(val_texts), chunk_size):
+                chunk_texts = val_texts[i:i+chunk_size]
+                chunk_nlp = self.nlp_extractor.transform(chunk_texts)
+                val_chunks.append(chunk_nlp)
+                del chunk_texts, chunk_nlp
+                collect_after_chunk(i // chunk_size, aggressive=True)
+                if (i // chunk_size) % 10 == 0:
+                    self.logger.info(f"Processed {min(i+chunk_size, len(val_texts))}/{len(val_texts)} validation texts")
+            from scipy.sparse import vstack
+            val_nlp = vstack(val_chunks)
+            del val_chunks
+            collect_after_operation("vstack_val_nlp", aggressive=True)
+        else:
+            val_nlp = self.nlp_extractor.transform(val_texts)
+        
+        if test_texts:
+            if len(test_texts) > chunk_size:
+                test_chunks = []
+                for i in range(0, len(test_texts), chunk_size):
+                    chunk_texts = test_texts[i:i+chunk_size]
+                    chunk_nlp = self.nlp_extractor.transform(chunk_texts)
+                    test_chunks.append(chunk_nlp)
+                    del chunk_texts, chunk_nlp
+                    collect_after_chunk(i // chunk_size, aggressive=True)
+                    if (i // chunk_size) % 10 == 0:
+                        self.logger.info(f"Processed {min(i+chunk_size, len(test_texts))}/{len(test_texts)} test texts")
+                test_nlp = vstack(test_chunks)
+                del test_chunks
+                collect_after_operation("vstack_test_nlp", aggressive=True)
+            else:
+                test_nlp = self.nlp_extractor.transform(test_texts)
+        else:
+            test_nlp = None
         
         # Embeddings (fit once on train, transform on all)
         embeddings_train = {}
@@ -157,41 +189,31 @@ class StagePipeline:
         if self.config.use_embeddings:
             self.logger.info("Extracting embeddings...")
             self.embedding_extractor.initialize_embeddings()
-            embeddings_train = self.embedding_extractor.extract_all_embeddings(train_texts, train_nlp)
-            embeddings_val = self.embedding_extractor.extract_all_embeddings(val_texts)
+            # Train Word2Vec on training data if needed, then extract all embeddings
+            embeddings_train = self.embedding_extractor.extract_all_embeddings(train_texts, train_nlp, train_word2vec=True)
+            embeddings_val = self.embedding_extractor.extract_all_embeddings(val_texts, train_word2vec=False)
             if test_texts:
-                embeddings_test = self.embedding_extractor.extract_all_embeddings(test_texts)
+                embeddings_test = self.embedding_extractor.extract_all_embeddings(test_texts, train_word2vec=False)
         
-        # Encodings (fit once on train, transform on all)
-        encodings_train = {}
-        encodings_val = {}
-        encodings_test = {}
-        
-        if self.config.use_encodings:
-            self.logger.info("Applying encodings...")
-            # Fit on train only
-            y_train = train_df[self.config.label_column].to_numpy()
-            # Note: Encodings would be applied here if we had categorical columns
-            # For now, text-based features don't need traditional encodings
-        
+        # Encodings not used for text-based features (no categorical columns)
         # Combine all features (done once)
         train_features = self.feature_union.combine_features(
             nlp_features=train_nlp,
             embeddings=embeddings_train,
-            encodings=encodings_train
+            encodings={}  # Empty - no categorical encodings needed
         )
         
         val_features = self.feature_union.combine_features(
             nlp_features=val_nlp,
             embeddings=embeddings_val,
-            encodings=encodings_val
+            encodings={}  # Empty - no categorical encodings needed
         )
         
         test_features = self.feature_union.combine_features(
             nlp_features=test_nlp,
             embeddings=embeddings_test,
-            encodings=encodings_test
-        ) if test_nlp else None
+            encodings={}  # Empty - no categorical encodings needed
+        ) if test_nlp is not None else None
         
         features = {
             'train': train_features,
@@ -253,8 +275,12 @@ class StagePipeline:
         
         # Fit on train, transform on all
         processed_train = preprocessor.fit_transform(features['train'])
+        collect_after_operation("preprocessing_fit_transform", aggressive=True)
         processed_val = preprocessor.transform(features['val'])
+        collect_after_operation("preprocessing_transform_val", aggressive=True)
         processed_test = preprocessor.transform(features['test']) if features.get('test') else None
+        if processed_test is not None:
+            collect_after_operation("preprocessing_transform_test", aggressive=True)
         
         processed = {
             'train': processed_train,
@@ -317,6 +343,7 @@ class StagePipeline:
             n_features_to_select=None,  # Select optimal number
             step=0.1  # Remove 10% of features at each step
         )
+        collect_after_operation("rfe_fit_transform", aggressive=True)
         
         # Apply feature selection to full datasets
         # Get processed test features if available
@@ -565,6 +592,7 @@ class StagePipeline:
         # Also train final model on all training data
         final_model = model_factory(**best_params)
         final_model.fit(X_train, y_train)
+        collect_after_operation("model_fit", aggressive=True)
         
         # Final evaluation on validation set
         model = final_model
@@ -808,7 +836,20 @@ class StagePipeline:
                 # Make predictions on test set using best model
                 final_model = self._get_model_factory(best_model_type)(**best_params)
                 final_model.fit(processed_features['train'], y_train)
-                test_predictions = final_model.predict_proba(processed_features['test'])[:, 1] if hasattr(final_model, 'predict_proba') else final_model.predict(processed_features['test'])
+                collect_after_operation("final_model_fit", aggressive=True)
+                if hasattr(final_model, 'predict_proba'):
+                    proba = final_model.predict_proba(processed_features['test'])
+                    collect_after_operation("final_model_predict_proba", aggressive=True)
+                    # Handle both 1D and 2D probability arrays
+                    if proba.ndim == 2 and proba.shape[1] >= 2:
+                        test_predictions = proba[:, 1]
+                    elif proba.ndim == 1:
+                        test_predictions = proba
+                    else:
+                        test_predictions = proba.flatten()
+                else:
+                    # Fallback to class predictions (0 or 1)
+                    test_predictions = final_model.predict(processed_features['test']).astype(float)
                 
                 # Generate submission CSV (ONLY CSV file)
                 submission_path = self.submission_generator.generate_submission(

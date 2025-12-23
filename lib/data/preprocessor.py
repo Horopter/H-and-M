@@ -24,6 +24,7 @@ except ImportError:
 from ..config import get_config
 from ..logging.logger import get_logger
 from ..utils.gpu_utils import to_gpu_if_needed, from_gpu_if_needed
+from ..utils.gc_utils import collect_after_operation
 
 logger = get_logger(__name__)
 
@@ -76,6 +77,9 @@ class Scaler(BasePreprocessor):
         self.logger.debug("Fitting StandardScaler")
         X_gpu = to_gpu_if_needed(X, self.use_gpu and CUML_AVAILABLE, sparse_to_dense=False)
         self.scaler.fit(X_gpu)
+        del X_gpu
+        if self.use_gpu and CUML_AVAILABLE:
+            collect_after_operation("scaler_fit", aggressive=True)
         self._fitted = True
         return self
     
@@ -87,7 +91,12 @@ class Scaler(BasePreprocessor):
         self.logger.debug("Transforming with StandardScaler")
         X_gpu = to_gpu_if_needed(X, self.use_gpu and CUML_AVAILABLE, sparse_to_dense=False)
         result = self.scaler.transform(X_gpu)
-        return from_gpu_if_needed(result)
+        del X_gpu
+        result_cpu = from_gpu_if_needed(result)
+        del result
+        if self.use_gpu and CUML_AVAILABLE:
+            collect_after_operation("scaler_transform", aggressive=True)
+        return result_cpu
 
 
 class MinMaxScaler(BasePreprocessor):
@@ -207,6 +216,9 @@ class PCAReducer(BasePreprocessor):
         self.logger.debug(f"Fitting PCA with n_components={self.n_components}")
         X_gpu = to_gpu_if_needed(X, self.use_gpu and CUML_AVAILABLE, sparse_to_dense=False)
         self.reducer.fit(X_gpu)
+        del X_gpu
+        if self.use_gpu and CUML_AVAILABLE:
+            collect_after_operation("pca_fit", aggressive=True)
         self._fitted = True
         return self
     
@@ -218,7 +230,12 @@ class PCAReducer(BasePreprocessor):
         self.logger.debug("Transforming with PCA")
         X_gpu = to_gpu_if_needed(X, self.use_gpu and CUML_AVAILABLE, sparse_to_dense=False)
         result = self.reducer.transform(X_gpu)
-        return from_gpu_if_needed(result)
+        del X_gpu
+        result_cpu = from_gpu_if_needed(result)
+        del result
+        if self.use_gpu and CUML_AVAILABLE:
+            collect_after_operation("pca_transform", aggressive=True)
+        return result_cpu
     
     def get_explained_variance_ratio(self):
         """Get explained variance ratio."""

@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<messages>
+    <!-- Stage Messages -->
+    <stage>
+        <start>STARTING STAGE-BASED PIPELINE</start>
+        <complete>Stage-based training pipeline completed</complete>
+        <stage_1>
+            <title>STAGE 1: EXPLORATORY DATA ANALYSIS</title>
+            <complete>Stage 1 complete: Exploratory analysis</complete>
+        </stage_1>
+        <stage_2>
+            <title>STAGE 2: STATISTICAL ANALYSIS</title>
+            <complete>Stage 2 complete: Statistical analysis</complete>
+        </stage_2>
+        <stage_3>
+            <title>STAGE 3: FEATURE ENGINEERING</title>
+            <complete>Stage 3 complete: Feature engineering (cached)</complete>
+            <extracting_nlp>Extracting NLP features...</extracting_nlp>
+            <extracting_embeddings>Extracting embeddings...</extracting_embeddings>
+            <applying_encodings>Applying encodings...</applying_encodings>
+            <saving_features>Saving engineered features to Arrow format...</saving_features>
+            <using_cached>Using cached features</using_cached>
+        </stage_3>
+        <stage_4>
+            <title>STAGE 4: PREPROCESSING</title>
+            <complete>Stage 4 complete: Preprocessing (cached)</complete>
+            <saving_preprocessed>Saving preprocessed features to Arrow format...</saving_preprocessed>
+            <using_cached_preprocessed>Using cached preprocessed features</using_cached_preprocessed>
+        </stage_4>
+        <stage_5>
+            <title>STAGE 5: RECURSIVE FEATURE ELIMINATION (RFE)</title>
+            <complete>Stage 5 complete: RFE</complete>
+        </stage_5>
+        <stage_6>
+            <title>STAGE 6: TRAINING ON 30% OF TRAIN/VAL DATA (CV + HYPERPARAMETER TUNING)</title>
+            <sampling_train>Sampling {train_sample_size} from {train_total} train samples (30%)</sampling_train>
+            <sampling_val>Sampling {val_sample_size} from {val_total} val samples (30%)</sampling_val>
+            <cv_info>CV folds will use 10% of original data per fold (random sampling)</cv_info>
+            <training_model>Training {model_type} on 30% subset...</training_model>
+        </stage_6>
+        <stage_7>
+            <title>STAGE 7: FULL TRAINING ON 100% OF TRAIN/VAL DATA</title>
+            <complete>Stage 7 complete: Full training</complete>
+        </stage_7>
+    </stage>
+    
+    <!-- Data Loading Messages -->
+    <data>
+        <loading_csv>Loading CSV from {file_path}</loading_csv>
+        <loaded_rows>Loaded {rows} rows, {columns} columns</loaded_rows>
+        <loaded_datasets>Loaded datasets - Train: {train}, Val: {val}, Test: {test}</loaded_datasets>
+        <removed_duplicates>Removed {removed} duplicate texts from validation set that appear in test set ({original} -> {clean})</removed_duplicates>
+        <no_duplicates>No duplicates found between validation and test sets</no_duplicates>
+    </data>
+    
+    <!-- Feature Engineering Messages -->
+    <features>
+        <extracting_nlp>Extracting all NLP features</extracting_nlp>
+        <extracting_tfidf>Extracting TF-IDF features</extracting_tfidf>
+        <extracting_embeddings>Extracting all embeddings</extracting_embeddings>
+        <combining_features>Combining all features</combining_features>
+        <feature_engineering_complete>Feature engineering complete. Train: {train_shape}, Val: {val_shape}</feature_engineering_complete>
+        <preprocessing_complete>Preprocessing complete. Train: {train_shape}, Val: {val_shape}</preprocessing_complete>
+    </features>
+    
+    <!-- Embedding Messages -->
+    <embeddings>
+        <training_word2vec>Training Word2Vec model on provided texts...</training_word2vec>
+        <word2vec_trained>Word2Vec model trained</word2vec_trained>
+        <word2vec_failed>Word2Vec embedding failed: {error}</word2vec_failed>
+        <sentence_transformer_failed>SentenceTransformer embedding failed: {error}</sentence_transformer_failed>
+        <bert_failed>BERT embedding failed: {error}</bert_failed>
+        <tfidf_weighted_failed>TF-IDF weighted embedding failed: {error}</tfidf_weighted_failed>
+        <extracted_types>Extracted {count} embedding types</extracted_types>
+        <model_not_trained>Model not trained or loaded</model_not_trained>
+        <skipping_word2vec>Word2Vec model not trained and train_word2vec=False, skipping</skipping_word2vec>
+        <could_not_train>Could not train Word2Vec model: {error}</could_not_train>
+        <could_not_initialize>Could not initialize Word2Vec: {error}</could_not_initialize>
+    </embeddings>
+    
+    <!-- RFE Messages -->
+    <rfe>
+        <performing>Performing RFE on {n_features} features</performing>
+        <using_rfecv>Using RFECV for automatic feature selection</using_rfecv>
+        <using_rfe>Using RFE to select {n_features} features</using_rfe>
+        <selected>RFE selected {selected} features from {original}</selected>
+        <not_fitted>RFE not fitted, returning original features</not_fitted>
+        <sklearn_unavailable>sklearn not available, RFE disabled</sklearn_unavailable>
+        <skipped>RFE skipped: sklearn not available</skipped>
+        <complete>RFE complete. Selected {n_features} features</complete>
+    </rfe>
+    
+    <!-- Training Messages -->
+    <training>
+        <starting_pipeline>Starting stage-based training pipeline</starting_pipeline>
+        <configuration>Configuration: {config}</configuration>
+        <random_seed>Using consistent random seed: {seed}</random_seed>
+        <random_seed_info>Random seed: {seed} (consistent across all stages)</random_seed_info>
+        <cv_f1>{model_type} CV F1: {f1:.4f}</cv_f1>
+        <best_model>Best model: {model_type} (F1: {f1:.4f})</best_model>
+        <no_best_model>No best model found, skipping full training</no_best_model>
+    </training>
+    
+    <!-- Model Messages -->
+    <model>
+        <fitting>Fitting {model_type} model</fitting>
+        <fitted>Model fitted</fitted>
+        <predicting>Predicting with {model_type}</predicting>
+        <saving>Saving {model_type} model to {path}</saving>
+        <saved>Model saved</saved>
+        <loading>Loading {model_type} model from {path}</loading>
+        <loaded>Model loaded</loaded>
+    </model>
+    
+    <!-- Checkpoint Messages -->
+    <checkpoint>
+        <saving>Saving checkpoint for {stage_name}</saving>
+        <saved>Checkpoint saved: {path}</saved>
+        <loading>Loading checkpoint from {path}</loading>
+        <loaded>Checkpoint loaded</loaded>
+        <not_found>Checkpoint not found: {path}</not_found>
+        <could_not_save>Could not save checkpoint for {stage_name}: {error}</could_not_save>
+        <deleting>Deleting existing checkpoints...</deleting>
+        <deleted_checkpoint>Deleted checkpoint: {path}</deleted_checkpoint>
+        <deleted_json>Deleted checkpoint JSON: {path}</deleted_json>
+    </checkpoint>
+    
+    <!-- Arrow Storage Messages -->
+    <arrow>
+        <saving_dataframe>Saving DataFrame {name} to {path}</saving_dataframe>
+        <saved_dataframe>Saved DataFrame {name} to {path}</saved_dataframe>
+        <saving_array>Saving array {name} to {path}</saving_array>
+        <saved_array>Saved array {name} to {path}</saved_array>
+        <saving_sparse>Saving sparse matrix {name} to {path}</saving_sparse>
+        <saved_sparse>Saved sparse matrix {name} to {path}</saved_sparse>
+        <saving_metrics>Saving metrics {name} to {path}</saving_metrics>
+        <saved_metrics>Saved metrics {name} to {path}</saved_metrics>
+        <loading_dataframe>Loading DataFrame {name} from {path}</loading_dataframe>
+        <loaded_dataframe>Loaded DataFrame {name} from {path}</loaded_dataframe>
+    </arrow>
+    
+    <!-- Submission Messages -->
+    <submission>
+        <generating>Generating submission file (ONLY CSV in pipeline)</generating>
+        <generating_file>Generating submission file...</generating_file>
+        <saved>Submission file saved to {path}</saved>
+        <shape>Submission shape: {shape}</shape>
+        <predictions_range>Predictions range: [{min:.4f}, {max:.4f}]</predictions_range>
+        <could_not_generate>Could not generate submission file: {error}</could_not_generate>
+    </submission>
+    
+    <!-- Error Messages -->
+    <error>
+        <loading_csv>Error loading CSV from {file_path}: {error}</loading_csv>
+        <saving_arrow>Error saving Arrow file {file_path}: {error}</saving_arrow>
+        <loading_arrow>Error loading Arrow file {file_path}: {error}</loading_arrow>
+        <pipeline_failed>Training pipeline failed: {error}</pipeline_failed>
+        <empty_data>Validation DataFrame is empty, nothing to filter</empty_data>
+        <missing_column>Text column '{column}' not found in {file_path}</missing_column>
+        <missing_required>Missing required columns: {columns}</missing_required>
+        <no_features>No features provided to combine</no_features>
+        <empty_x>X is empty (0 samples)</empty_x>
+        <invalid_shape>Invalid X shape {shape}</invalid_shape>
+    </error>
+    
+    <!-- Warning Messages -->
+    <warning>
+        <missing_values>Found missing values: {missing}</missing_values>
+        <empty_features>NLP features are empty, skipping</empty_features>
+        <empty_stylistic>Stylistic features are empty, skipping</empty_stylistic>
+        <empty_embedding>Embedding {name} is empty, skipping</empty_embedding>
+        <gensim_unavailable>gensim not available, cannot load pre-trained model</gensim_unavailable>
+        <sentence_transformers_unavailable>sentence-transformers not available</sentence_transformers_unavailable>
+        <transformers_unavailable>transformers not available</transformers_unavailable>
+        <could_not_load_model>Could not load model from {path}: {error}</could_not_load_model>
+        <could_not_load_sentence_transformer>Could not load SentenceTransformer: {error}</could_not_load_sentence_transformer>
+        <could_not_load_bert>Could not load BERT model: {error}</could_not_load_bert>
+        <pipeline_not_fitted>Pipeline must be fitted before transform</pipeline_not_fitted>
+    </warning>
+    
+    <!-- Info Messages -->
+    <info>
+        <original_sizes>Original data sizes - Train: {train}, Val: {val}, Test: {test}, Total: {total}</original_sizes>
+        <processed_chunk>Processed {current}/{total} {dataset} texts</processed_chunk>
+        <combined_features>Combined features: shape {shape}</combined_features>
+        <extracted_features>Extracted {n_features} total features</extracted_features>
+        <added_nlp>Added NLP features: {shape}</added_nlp>
+        <added_stylistic>Added stylistic features: {shape}</added_stylistic>
+        <added_embedding>Added {name} embeddings: {shape}</added_embedding>
+        <added_encoding>Added {name} encoding</added_encoding>
+    </info>
+    
+    <!-- Debug Messages -->
+    <debug>
+        <no_missing_values>No missing values found</no_missing_values>
+        <schema_validation_passed>{dataset} schema validation passed</schema_validation_passed>
+        <folding>Fitting {name}</folding>
+        <transforming>Transforming with {name}</transforming>
+        <transforming_pipeline>Transforming through preprocessing pipeline</transforming_pipeline>
+        <embedding_texts>Embedding {count} texts with {method}</embedding_texts>
+        <computing_tfidf_weighted>Computing TF-IDF weighted embeddings</computing_tfidf_weighted>
+    </debug>
+</messages>
+

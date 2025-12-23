@@ -133,10 +133,11 @@ class Trainer:
         
         if self.config.use_embeddings:
             self.embedding_extractor.initialize_embeddings()
-            embeddings_train = self.embedding_extractor.extract_all_embeddings(train_texts, train_nlp)
-            embeddings_val = self.embedding_extractor.extract_all_embeddings(val_texts)
+            # Train Word2Vec on training data if needed, then extract all embeddings
+            embeddings_train = self.embedding_extractor.extract_all_embeddings(train_texts, train_nlp, train_word2vec=True)
+            embeddings_val = self.embedding_extractor.extract_all_embeddings(val_texts, train_word2vec=False)
             if test_texts:
-                embeddings_test = self.embedding_extractor.extract_all_embeddings(test_texts)
+                embeddings_test = self.embedding_extractor.extract_all_embeddings(test_texts, train_word2vec=False)
         
         # Combine features
         train_features = self.feature_union.combine_features(
@@ -274,7 +275,7 @@ class Trainer:
         
         # Evaluate on validation
         y_pred = model.predict(X_val)
-        y_proba = model.predict_proba(X_val)[:, 1]
+        y_proba = model.predict_proba(X_val)[:, 1] if hasattr(model, 'predict_proba') else None
         
         from sklearn.metrics import f1_score, accuracy_score, precision_score, recall_score, roc_auc_score
         

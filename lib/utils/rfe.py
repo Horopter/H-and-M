@@ -4,7 +4,6 @@ Recursive Feature Elimination (RFE) for feature selection.
 import numpy as np
 from typing import Dict, Any, Optional, List
 from scipy.sparse import csr_matrix
-from pathlib import Path
 
 try:
     from sklearn.feature_selection import RFE, RFECV
@@ -15,6 +14,7 @@ except ImportError:
 
 from ..config import get_config
 from ..logging.logger import get_logger
+from ..utils.gc_utils import collect_after_chunk
 
 logger = get_logger(__name__)
 
@@ -60,8 +60,22 @@ class RecursiveFeatureElimination:
         self.logger.info(f"Performing RFE on {X.shape[1]} features")
         
         # Convert sparse to dense if needed (RFE requires dense)
+        # Process in chunks to save memory
+        from ..constants import DEFAULT_CHUNK_SIZE
+        chunk_size = getattr(self.config, 'chunk_size', DEFAULT_CHUNK_SIZE) if hasattr(self, 'config') else DEFAULT_CHUNK_SIZE
         if isinstance(X, csr_matrix):
-            X_dense = X.toarray()
+            if X.shape[0] > chunk_size:
+                chunks = []
+                for i in range(0, X.shape[0], chunk_size):
+                    chunk = X[i:i+chunk_size].toarray()
+                    chunks.append(chunk)
+                    del chunk
+                    collect_after_chunk(i // chunk_size, aggressive=True)
+                X_dense = np.vstack(chunks)
+                del chunks
+                collect_after_chunk(None, aggressive=True)
+            else:
+                X_dense = X.toarray()
         else:
             X_dense = X
         
@@ -92,6 +106,8 @@ class RecursiveFeatureElimination:
         
         # Fit selector
         self.selector.fit(X_dense, y)
+        del X_dense
+        collect_after_operation("rfe_selector_fit", aggressive=True)
         
         self.n_features_selected = self.selector.n_features_
         
@@ -123,16 +139,25 @@ class RecursiveFeatureElimination:
             self.logger.warning("RFE not fitted, returning original features")
             return X
         
-        # Convert sparse to dense if needed
+        # Convert sparse to dense if needed (chunked for memory)
+        from ..constants import DEFAULT_CHUNK_SIZE
+        chunk_size = getattr(self.config, 'chunk_size', DEFAULT_CHUNK_SIZE) if hasattr(self, 'config') else DEFAULT_CHUNK_SIZE
         if isinstance(X, csr_matrix):
-            X_dense = X.toarray()
+            if X.shape[0] > chunk_size:
+                chunks = []
+                for i in range(0, X.shape[0], chunk_size):
+                    chunk = self.selector.transform(X[i:i+chunk_size].toarray())
+                    chunks.append(chunk)
+                    del chunk
+                    collect_after_chunk(i // chunk_size, aggressive=True)
+                X_selected = np.vstack(chunks)
+                del chunks
+                collect_after_chunk(None, aggressive=True)
+            else:
+                X_selected = self.selector.transform(X.toarray())
         else:
-            X_dense = X
-        
-        # Transform
-        X_selected = self.selector.transform(X_dense)
+            X_selected = self.selector.transform(X)
         
         # Convert back to sparse
-        from scipy.sparse import csr_matrix
         return csr_matrix(X_selected)
 

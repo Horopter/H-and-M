@@ -10,6 +10,7 @@ import numpy as np
 
 from ..config import get_config
 from ..logging.logger import get_logger
+from ..utils.gc_utils import collect_after_chunk
 
 logger = get_logger(__name__)
 
@@ -32,16 +33,18 @@ class DataLoader:
         file_path: str,
         text_column: Optional[str] = None,
         label_column: Optional[str] = None,
-        id_column: Optional[str] = None
+        id_column: Optional[str] = None,
+        chunked: bool = True
     ) -> pl.DataFrame:
         """
-        Load CSV file using Polars.
+        Load CSV file using Polars with chunked processing.
         
         Args:
             file_path: Path to CSV file
             text_column: Name of text column (uses config default if None)
             label_column: Name of label column (uses config default if None)
             id_column: Name of ID column (uses config default if None)
+            chunked: If True, load in chunks to save memory
             
         Returns:
             Polars DataFrame
@@ -50,37 +53,144 @@ class DataLoader:
         self.logger.info(f"Loading CSV from {file_path}")
         
         try:
-            df = pl.read_csv(
-                file_path,
-                try_parse_dates=False,
-                encoding='utf8-lossy'
-            )
-            
-            # Validate required columns
             text_col = text_column or self.config.text_column
-            if text_col not in df.columns:
-                raise ValueError(f"Text column '{text_col}' not found in {file_path}")
-            
-            # Convert text column to string
-            df = df.with_columns([
-                pl.col(text_col).cast(pl.Utf8).alias(text_col)
-            ])
-            
-            # Handle label column if present
             label_col = label_column or self.config.label_column
-            if label_col in df.columns:
-                df = df.with_columns([
-                    pl.col(label_col).cast(pl.Int64).alias(label_col)
-                ])
-            
-            # Handle ID column
             id_col = id_column or self.config.id_column
-            if id_col in df.columns:
-                df = df.with_columns([
-                    pl.col(id_col).cast(pl.Int64).alias(id_col)
-                ])
             
-            self.logger.info(f"Loaded {len(df)} rows, {len(df.columns)} columns")
+            if chunked and self.config.chunk_size > 0:
+                # Use scan_csv for lazy evaluation and chunked processing
+                try:
+                    # Try lazy scan approach (more memory efficient)
+                    lazy_df = pl.scan_csv(
+                        file_path,
+                        try_parse_dates=False,
+                        encoding='utf8-lossy'
+                    )
+                    
+                    # Collect in chunks
+                    chunk_size = self.config.chunk_size
+                    chunks = []
+                    total_rows = 0
+                    
+                    # Get total row count for progress (optional)
+                    try:
+                        count_result = lazy_df.select(pl.count()).collect()
+                        if len(count_result) > 0:
+                            row_count = count_result[0, 0] if hasattr(count_result, '__getitem__') else None
+                        else:
+                            row_count = None
+                    except:
+                        row_count = None
+                    
+                    offset = 0
+                    while True:
+                        chunk_df = lazy_df.slice(offset, chunk_size).collect()
+                        
+                        # Ensure chunk_df is a DataFrame
+                        if not isinstance(chunk_df, pl.DataFrame):
+                            raise TypeError(f"Expected DataFrame, got {type(chunk_df)}")
+                        
+                        if len(chunk_df) == 0:
+                            break
+                        
+                        # Validate columns on first chunk
+                        if offset == 0:
+                            if text_col not in chunk_df.columns:
+                                raise ValueError(f"Text column '{text_col}' not found in {file_path}")
+                        
+                        # Process chunk
+                        chunk_df = chunk_df.with_columns([
+                            pl.col(text_col).cast(pl.Utf8).alias(text_col)
+                        ])
+                        
+                        if label_col and label_col in chunk_df.columns:
+                            chunk_df = chunk_df.with_columns([
+                                pl.col(label_col).cast(pl.Int64).alias(label_col)
+                            ])
+                        
+                        if id_col and id_col in chunk_df.columns:
+                            chunk_df = chunk_df.with_columns([
+                                pl.col(id_col).cast(pl.Int64).alias(id_col)
+                            ])
+                        
+                        chunks.append(chunk_df)
+                        chunk_len = len(chunk_df)
+                        total_rows += chunk_len
+                        offset += chunk_size
+                        
+                        # Aggressive GC after each chunk
+                        collect_after_chunk(offset // chunk_size, aggressive=True)
+                        
+                        # Clear chunk reference
+                        del chunk_df
+                        
+                        if chunk_len < chunk_size:
+                            break
+                    
+                    df = pl.concat(chunks)
+                    
+                    # Final validation
+                    if not isinstance(df, pl.DataFrame):
+                        raise TypeError(f"Expected DataFrame after concat, got {type(df)}")
+                    
+                    self.logger.info(f"Loaded {len(df)} rows in {len(chunks)} chunks, {len(df.columns)} columns")
+                except Exception as scan_error:
+                    # Fallback to regular read if scan_csv fails
+                    self.logger.debug(f"scan_csv failed, using regular read: {scan_error}")
+                    df = pl.read_csv(
+                        file_path,
+                        try_parse_dates=False,
+                        encoding='utf8-lossy'
+                    )
+                    
+                    if text_col not in df.columns:
+                        raise ValueError(f"Text column '{text_col}' not found in {file_path}")
+                    
+                    df = df.with_columns([
+                        pl.col(text_col).cast(pl.Utf8).alias(text_col)
+                    ])
+                    
+                    if label_col and label_col in df.columns:
+                        df = df.with_columns([
+                            pl.col(label_col).cast(pl.Int64).alias(label_col)
+                        ])
+                    
+                    if id_col and id_col in df.columns:
+                        df = df.with_columns([
+                            pl.col(id_col).cast(pl.Int64).alias(id_col)
+                        ])
+                    
+                    self.logger.info(f"Loaded {len(df)} rows, {len(df.columns)} columns")
+            else:
+                df = pl.read_csv(
+                    file_path,
+                    try_parse_dates=False,
+                    encoding='utf8-lossy'
+                )
+                
+                # Ensure df is a DataFrame
+                if not isinstance(df, pl.DataFrame):
+                    raise TypeError(f"Expected DataFrame, got {type(df)}")
+                
+                if text_col not in df.columns:
+                    raise ValueError(f"Text column '{text_col}' not found in {file_path}")
+                
+                df = df.with_columns([
+                    pl.col(text_col).cast(pl.Utf8).alias(text_col)
+                ])
+                
+                if label_col and label_col in df.columns:
+                    df = df.with_columns([
+                        pl.col(label_col).cast(pl.Int64).alias(label_col)
+                    ])
+                
+                if id_col and id_col in df.columns:
+                    df = df.with_columns([
+                        pl.col(id_col).cast(pl.Int64).alias(id_col)
+                    ])
+                
+                self.logger.info(f"Loaded {len(df)} rows, {len(df.columns)} columns")
+            
             return df
             
         except Exception as e:

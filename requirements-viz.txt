@@ -1,4 +1,4 @@
 # Visualization packages
-matplotlib>=3.7.0
+matplotlib>=3.3.4
 seaborn>=0.12.0
 

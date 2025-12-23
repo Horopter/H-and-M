@@ -19,6 +19,7 @@ except ImportError:
 from .base import BaseModel
 from ..config import get_config
 from ..logging.logger import get_logger
+from ..utils.gc_utils import collect_after_operation, get_gc_manager
 
 logger = get_logger(__name__)
 
@@ -138,6 +139,7 @@ class NeuralNetworkModel(BaseModel):
         # Convert sparse to dense if needed
         if isinstance(X, csr_matrix):
             X = X.toarray()
+            collect_after_operation("sparse_to_dense", aggressive=True)
         
         # Validate input shape
         if X.shape[0] == 0:
@@ -154,44 +156,71 @@ class NeuralNetworkModel(BaseModel):
             dropout=self.dropout
         ).to(self.device)
         
+        # GC after model creation
+        if self.device.type == 'cuda':
+            collect_after_operation("model_to_gpu", aggressive=True)
+        
         # Create optimizer
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
         
         # Create dataset and dataloader
         dataset = MLPDataset(X, y)
+        del X, y  # Free memory
+        collect_after_operation("dataset_creation", aggressive=True)
+        
         dataloader = DataLoader(
             dataset,
             batch_size=self.batch_size,
             shuffle=True
         )
         
-        # Training loop
+        # Training loop with gradient accumulation
         best_loss = float('inf')
         patience_counter = 0
+        accumulation_steps = getattr(self.config, 'gradient_accumulation_steps', 4) if hasattr(self, 'config') else 4
         
         for epoch in range(self.epochs):
             self.model.train()
             epoch_loss = 0.0
+            self.optimizer.zero_grad()
             
-            for batch_X, batch_y in dataloader:
+            for batch_idx, (batch_X, batch_y) in enumerate(dataloader):
                 batch_X = batch_X.to(self.device)
                 batch_y = batch_y.to(self.device)
                 
                 # Forward pass
-                self.optimizer.zero_grad()
                 outputs = self.model(batch_X)
                 loss = self.criterion(outputs, batch_y)
+                loss = loss / accumulation_steps
                 
-                # Backward pass
+                # Backward pass (accumulate gradients)
                 loss.backward()
-                self.optimizer.step()
                 
-                epoch_loss += loss.item()
+                # Update weights every accumulation_steps
+                if (batch_idx + 1) % accumulation_steps == 0 or (batch_idx + 1) == len(dataloader):
+                    self.optimizer.step()
+                    self.optimizer.zero_grad()
+                    
+                    # HYPER-AGGRESSIVE GC after optimizer step (GPU intensive)
+                    if self.device.type == 'cuda':
+                        get_gc_manager().clear_caches()
+                
+                epoch_loss += loss.item() * accumulation_steps
+                
+                # Free batch tensors
+                del batch_X, batch_y, outputs, loss
+                
+                # GC after every batch (HYPER-AGGRESSIVE)
+                if (batch_idx + 1) % 10 == 0:  # Every 10 batches
+                    collect_after_operation("batch_processing", aggressive=True)
             
             avg_loss = epoch_loss / len(dataloader)
             
             if (epoch + 1) % 10 == 0:
                 self.logger.info(f"Epoch {epoch+1}/{self.epochs}, Loss: {avg_loss:.4f}")
+            
+            # HYPER-AGGRESSIVE GC after each epoch
+            collect_after_operation(f"epoch_{epoch+1}", aggressive=True)
             
             # Early stopping
             if avg_loss < best_loss:
@@ -202,6 +231,9 @@ class NeuralNetworkModel(BaseModel):
                 if patience_counter >= self.early_stopping_patience:
                     self.logger.info(f"Early stopping at epoch {epoch+1}")
                     break
+        
+        # Final GC after training
+        collect_after_operation("training_complete", aggressive=True)
         
         self._fitted = True
         self.logger.info("Neural Network model fitted")
@@ -219,6 +251,11 @@ class NeuralNetworkModel(BaseModel):
             X_tensor = torch.FloatTensor(X).to(self.device)
             outputs = self.model(X_tensor)
             predictions = (outputs.cpu().numpy() > 0.5).astype(int)
+            del X_tensor, outputs
+        
+        # GC after prediction
+        if self.device.type == 'cuda':
+            collect_after_operation("predict", aggressive=True)
         
         return predictions
     
@@ -234,11 +271,17 @@ class NeuralNetworkModel(BaseModel):
             X_tensor = torch.FloatTensor(X).to(self.device)
             outputs = self.model(X_tensor)
             probabilities = outputs.cpu().numpy()
+            del X_tensor, outputs
         
         # Return probabilities for both classes
         proba = np.zeros((len(probabilities), 2))
         proba[:, 1] = probabilities
         proba[:, 0] = 1 - probabilities
+        del probabilities
+        
+        # GC after predict_proba
+        if self.device.type == 'cuda':
+            collect_after_operation("predict_proba", aggressive=True)
         
         return proba
     

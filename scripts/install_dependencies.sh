@@ -14,13 +14,25 @@ echo "=========================================="
 echo "Project directory: $PROJECT_DIR"
 cd "$PROJECT_DIR"
 
+# Load Python module (use system-supported version)
+echo "Loading Python module..."
+module purge 2>/dev/null || true
+module load python3.11-anaconda/2024.02 2>/dev/null || {
+    echo "⚠ Warning: Could not load python3.11-anaconda/2024.02, using system Python"
+    python3 --version
+}
+
 # Activate venv if it exists
 if [ -d "venv" ]; then
     if [ -f "venv/bin/activate" ]; then
         source venv/bin/activate
         echo "✓ Activated virtual environment"
     else
-        echo "⚠ venv directory exists but activate script not found"
+        echo "⚠ venv directory exists but activate script not found, recreating..."
+        rm -rf venv
+        python3 -m venv venv
+        source venv/bin/activate
+        echo "✓ Created and activated virtual environment"
     fi
 else
     echo "⚠ No virtual environment found. Creating one..."
@@ -28,6 +40,14 @@ else
     source venv/bin/activate
     echo "✓ Created and activated virtual environment"
 fi
+
+# Upgrade pip to latest version
+echo ""
+echo "Upgrading pip..."
+python3 -m pip install --upgrade pip --quiet || {
+    echo "⚠ Warning: pip upgrade failed, continuing with current version"
+}
+pip --version
 
 # Function to install with retries and memory-friendly options
 install_batch() {
@@ -46,7 +66,7 @@ install_batch() {
     # Try up to 3 times
     for attempt in 1 2 3; do
         echo "Attempt $attempt/3..."
-        if pip install --no-cache-dir --no-build-isolation -r "$file" 2>&1 | tee -a "$PROJECT_DIR/logs/install.log"; then
+        if pip install --no-cache-dir -r "$file" 2>&1 | tee -a "$PROJECT_DIR/logs/install.log"; then
             echo "✓ Successfully installed $name"
             return 0
         else

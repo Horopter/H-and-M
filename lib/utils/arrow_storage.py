@@ -165,6 +165,10 @@ class ArrowStorage:
             df = pl.read_parquet(str(load_path))
             metadata_df = pl.read_parquet(str(metadata_path))
             
+            if 'shape_0' not in metadata_df.columns or 'shape_1' not in metadata_df.columns:
+                return None
+            if len(metadata_df) == 0:
+                return None
             shape_0 = metadata_df['shape_0'][0]
             shape_1 = metadata_df['shape_1'][0]
             

@@ -7,6 +7,7 @@ from scipy.sparse import csr_matrix
 
 from ..config import get_config
 from ..logging.logger import get_logger
+from ..utils.gc_utils import collect_after_chunk
 
 logger = get_logger(__name__)
 
@@ -166,7 +167,7 @@ class SentenceTransformerEmbeddings:
         except Exception as e:
             self.logger.warning(f"Could not load SentenceTransformer: {e}")
     
-    def embed_batch(self, texts: List[str], batch_size: int = 32) -> np.ndarray:
+    def embed_batch(self, texts: List[str], batch_size: Optional[int] = None) -> np.ndarray:
         """
         Get embeddings for a batch of texts.
         
@@ -180,14 +181,24 @@ class SentenceTransformerEmbeddings:
         if self.model is None:
             raise ValueError("SentenceTransformer model not loaded")
         
-        self.logger.debug(f"Embedding {len(texts)} texts with SentenceTransformer")
+        if batch_size is None:
+            batch_size = 32
+        
+        self.logger.debug(f"Embedding {len(texts)} texts with SentenceTransformer (batch_size={batch_size})")
         embeddings = self.model.encode(
             texts,
             batch_size=batch_size,
             show_progress_bar=False,
             convert_to_numpy=True
         )
-        return embeddings.astype(np.float32)
+        result = embeddings.astype(np.float32)
+        del embeddings
+        
+        # GC after GPU-intensive embedding
+        if self.device == 'cuda':
+            collect_after_operation("sentence_transformer_embed", aggressive=True)
+        
+        return result
 
 
 class BERTEmbeddings:
@@ -290,10 +301,21 @@ class BERTEmbeddings:
                     embeddings = hidden_states.max(1)[0].cpu().numpy()
                 else:
                     embeddings = hidden_states.mean(1).cpu().numpy()
+                
+                # Free GPU tensors immediately
+                del outputs, hidden_states, encoded
             
             all_embeddings.append(embeddings)
+            del embeddings
+            
+            # GC after each batch (HYPER-AGGRESSIVE for GPU)
+            if self.device == 'cuda':
+                collect_after_operation("bert_embed_batch", aggressive=True)
         
-        return np.vstack(all_embeddings).astype(np.float32)
+        result = np.vstack(all_embeddings).astype(np.float32)
+        del all_embeddings
+        collect_after_operation("bert_embed_complete", aggressive=True)
+        return result
 
 
 class TFIDFWeightedEmbeddings:
@@ -331,7 +353,19 @@ class TFIDFWeightedEmbeddings:
         base_emb = self.base_embeddings.embed_batch(texts)
         
         # Get TF-IDF weights (assuming same order as texts)
-        tfidf_weights = self.tfidf_matrix.toarray()
+        # Process in chunks to save memory
+        from ..constants import DEFAULT_CHUNK_SIZE
+        chunk_size = DEFAULT_CHUNK_SIZE
+        if hasattr(self.base_embeddings, 'config') and hasattr(self.base_embeddings.config, 'chunk_size'):
+            chunk_size = self.base_embeddings.config.chunk_size
+        
+        if self.tfidf_matrix.shape[0] > chunk_size:
+            chunks = []
+            for i in range(0, self.tfidf_matrix.shape[0], chunk_size):
+                chunks.append(self.tfidf_matrix[i:i+chunk_size].toarray())
+            tfidf_weights = np.vstack(chunks)
+        else:
+            tfidf_weights = self.tfidf_matrix.toarray()
         
         # Weight embeddings by TF-IDF
         # This is a simplified version - in practice, you'd weight word embeddings
@@ -396,13 +430,14 @@ class EmbeddingExtractor:
             except Exception as e:
                 self.logger.warning(f"Could not initialize BERT: {e}")
     
-    def extract_all_embeddings(self, texts: List[str], tfidf_matrix: Optional[csr_matrix] = None) -> Dict[str, np.ndarray]:
+    def extract_all_embeddings(self, texts: List[str], tfidf_matrix: Optional[csr_matrix] = None, train_word2vec: bool = False, chunk_size: Optional[int] = None) -> Dict[str, np.ndarray]:
         """
         Extract all available embeddings.
         
         Args:
             texts: List of text strings
             tfidf_matrix: Optional TF-IDF matrix for weighted embeddings
+            train_word2vec: If True and Word2Vec model is not trained, train it on texts
             
         Returns:
             Dictionary of embedding type to embedding array
@@ -410,21 +445,77 @@ class EmbeddingExtractor:
         self.logger.info("Extracting all embeddings")
         embeddings = {}
         
+        if chunk_size is None:
+            from ..constants import DEFAULT_CHUNK_SIZE
+            chunk_size = getattr(self.config, 'chunk_size', DEFAULT_CHUNK_SIZE) if hasattr(self, 'config') else DEFAULT_CHUNK_SIZE
+        batch_size = getattr(self.config, 'embedding_batch_size', 32) if hasattr(self, 'config') else 32
+        
         if self.word2vec:
-            try:
-                embeddings['word2vec'] = self.word2vec.embed_batch(texts)
-            except Exception as e:
-                self.logger.warning(f"Word2Vec embedding failed: {e}")
+            # Check if Word2Vec model is trained/loaded
+            if self.word2vec.model is None:
+                if train_word2vec:
+                    try:
+                        self.logger.info("Training Word2Vec model on provided texts...")
+                        self.word2vec.train(texts)
+                    except Exception as e:
+                        self.logger.warning(f"Could not train Word2Vec model: {e}")
+                        self.word2vec = None  # Disable Word2Vec if training fails
+                else:
+                    self.logger.debug("Word2Vec model not trained and train_word2vec=False, skipping")
+                    self.word2vec = None  # Disable Word2Vec if not trained
+            
+            # Try to extract embeddings if model is available
+            if self.word2vec and self.word2vec.model is not None:
+                try:
+                    if len(texts) > chunk_size:
+                        chunk_embeddings = []
+                        for i in range(0, len(texts), chunk_size):
+                            chunk_texts = texts[i:i+chunk_size]
+                            chunk_emb = self.word2vec.embed_batch(chunk_texts)
+                            chunk_embeddings.append(chunk_emb)
+                            del chunk_texts, chunk_emb
+                            collect_after_chunk(i // chunk_size, aggressive=True)
+                        embeddings['word2vec'] = np.vstack(chunk_embeddings)
+                        del chunk_embeddings
+                        collect_after_chunk(None, aggressive=True)
+                    else:
+                        embeddings['word2vec'] = self.word2vec.embed_batch(texts)
+                except Exception as e:
+                    self.logger.warning(f"Word2Vec embedding failed: {e}")
         
         if self.sentence_transformer:
             try:
-                embeddings['sentence_transformer'] = self.sentence_transformer.embed_batch(texts)
+                if len(texts) > chunk_size:
+                    chunk_embeddings = []
+                    for i in range(0, len(texts), chunk_size):
+                        chunk_texts = texts[i:i+chunk_size]
+                        chunk_emb = self.sentence_transformer.embed_batch(chunk_texts, batch_size=batch_size)
+                        chunk_embeddings.append(chunk_emb)
+                        del chunk_texts, chunk_emb
+                        collect_after_chunk(i // chunk_size, aggressive=True)
+                    embeddings['sentence_transformer'] = np.vstack(chunk_embeddings)
+                    del chunk_embeddings
+                    collect_after_chunk(None, aggressive=True)
+                else:
+                    embeddings['sentence_transformer'] = self.sentence_transformer.embed_batch(texts, batch_size=batch_size)
             except Exception as e:
                 self.logger.warning(f"SentenceTransformer embedding failed: {e}")
         
         if self.bert:
             try:
-                embeddings['bert'] = self.bert.embed_batch(texts)
+                if len(texts) > chunk_size:
+                    chunk_embeddings = []
+                    for i in range(0, len(texts), chunk_size):
+                        chunk_texts = texts[i:i+chunk_size]
+                        chunk_emb = self.bert.embed_batch(chunk_texts, batch_size=batch_size)
+                        chunk_embeddings.append(chunk_emb)
+                        del chunk_texts, chunk_emb
+                        collect_after_chunk(i // chunk_size, aggressive=True)
+                    embeddings['bert'] = np.vstack(chunk_embeddings)
+                    del chunk_embeddings
+                    collect_after_chunk(None, aggressive=True)
+                else:
+                    embeddings['bert'] = self.bert.embed_batch(texts, batch_size=batch_size)
             except Exception as e:
                 self.logger.warning(f"BERT embedding failed: {e}")
         

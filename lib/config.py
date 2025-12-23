@@ -6,6 +6,30 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional
 import json
 
+from .constants import (
+    DEFAULT_DATA_PATH, DEFAULT_CHECKPOINT_DIR, DEFAULT_LOG_DIR, DEFAULT_MODEL_DIR, DEFAULT_OUTPUT_DIR,
+    DEFAULT_TRAIN_FILE, DEFAULT_VAL_FILE, DEFAULT_TEST_FILE,
+    DEFAULT_TEXT_COLUMN, DEFAULT_LABEL_COLUMN, DEFAULT_ID_COLUMN,
+    DEFAULT_USE_GPU, DEFAULT_GPU_ID, DEFAULT_NUM_GPUS,
+    DEFAULT_CV_FOLDS, DEFAULT_SUBSET_SIZE, DEFAULT_RANDOM_STATE, DEFAULT_STRATIFIED, DEFAULT_USE_RFE, DEFAULT_N_JOBS,
+    DEFAULT_MODELS,
+    DEFAULT_USE_NLP_FEATURES, DEFAULT_USE_EMBEDDINGS, DEFAULT_USE_ENCODINGS,
+    DEFAULT_WORD2VEC_DIM, DEFAULT_SENTENCE_TRANSFORMER_MODEL, DEFAULT_BERT_MODEL, DEFAULT_EMBEDDING_AGGREGATION,
+    DEFAULT_SCALE_FEATURES, DEFAULT_IMPUTE_MISSING, DEFAULT_USE_PCA, DEFAULT_PCA_COMPONENTS, DEFAULT_NORMALIZE,
+    DEFAULT_NN_HIDDEN_LAYERS, DEFAULT_NN_DROPOUT, DEFAULT_NN_LEARNING_RATE, DEFAULT_NN_BATCH_SIZE,
+    DEFAULT_NN_EPOCHS, DEFAULT_NN_EARLY_STOPPING_PATIENCE,
+    DEFAULT_XGB_TREE_METHOD, DEFAULT_XGB_MAX_DEPTH, DEFAULT_XGB_LEARNING_RATE, DEFAULT_XGB_N_ESTIMATORS,
+    DEFAULT_PARALLEL_BACKEND,
+    DEFAULT_SAVE_CHECKPOINTS, DEFAULT_CHECKPOINT_FREQUENCY, DEFAULT_KEEP_BEST_N,
+    DEFAULT_CHUNK_SIZE, DEFAULT_EMBEDDING_BATCH_SIZE, DEFAULT_GRADIENT_ACCUMULATION_STEPS,
+    DEFAULT_LOG_LEVEL, DEFAULT_LOG_TO_FILE, DEFAULT_LOG_TO_CONSOLE,
+    DEFAULT_ARROW_FORMAT, DEFAULT_COMPRESSION,
+    DEFAULT_HYPERPARAMETER_GRIDS,
+    ENV_DATA_PATH, ENV_CHECKPOINT_DIR, ENV_LOG_DIR, ENV_MODEL_DIR, ENV_OUTPUT_DIR,
+    ENV_USE_GPU, ENV_GPU_ID, ENV_NUM_GPUS, ENV_USE_RFE, ENV_N_JOBS, ENV_DELETE_EXISTING,
+    ENV_CHUNK_SIZE, ENV_EMBEDDING_BATCH_SIZE, ENV_GRADIENT_ACCUMULATION_STEPS
+)
+
 
 class Config:
     """Centralized configuration for the ML pipeline."""
@@ -21,89 +45,94 @@ class Config:
     def _load_defaults(self):
         """Load default configuration."""
         # Paths
-        self.data_path = os.getenv('DATA_PATH', 'data/')
-        self.checkpoint_dir = os.getenv('CHECKPOINT_DIR', 'checkpoints/')
-        self.log_dir = os.getenv('LOG_DIR', 'logs/')
-        self.model_dir = os.getenv('MODEL_DIR', 'models/')
-        self.output_dir = os.getenv('OUTPUT_DIR', 'outputs/')
+        self.data_path = os.getenv(ENV_DATA_PATH, DEFAULT_DATA_PATH)
+        self.checkpoint_dir = os.getenv(ENV_CHECKPOINT_DIR, DEFAULT_CHECKPOINT_DIR)
+        self.log_dir = os.getenv(ENV_LOG_DIR, DEFAULT_LOG_DIR)
+        self.model_dir = os.getenv(ENV_MODEL_DIR, DEFAULT_MODEL_DIR)
+        self.output_dir = os.getenv(ENV_OUTPUT_DIR, DEFAULT_OUTPUT_DIR)
         
         # GPU settings
-        self.use_gpu = os.getenv('USE_GPU', 'true').lower() == 'true'
-        self.gpu_id = int(os.getenv('GPU_ID', '0'))
-        self.num_gpus = int(os.getenv('NUM_GPUS', '1'))
+        self.use_gpu = os.getenv(ENV_USE_GPU, str(DEFAULT_USE_GPU)).lower() == 'true'
+        self.gpu_id = int(os.getenv(ENV_GPU_ID, str(DEFAULT_GPU_ID)))
+        self.num_gpus = int(os.getenv(ENV_NUM_GPUS, str(DEFAULT_NUM_GPUS)))
         
         # Data settings
-        self.train_file = 'train.csv'
-        self.val_file = 'val.csv'
-        self.test_file = 'test.csv'
-        self.text_column = 'text'
-        self.label_column = 'label'
-        self.id_column = 'id'
+        self.train_file = DEFAULT_TRAIN_FILE
+        self.val_file = DEFAULT_VAL_FILE
+        self.test_file = DEFAULT_TEST_FILE
+        self.text_column = DEFAULT_TEXT_COLUMN
+        self.label_column = DEFAULT_LABEL_COLUMN
+        self.id_column = DEFAULT_ID_COLUMN
         
         # Training settings
-        self.cv_folds = 5
-        self.subset_size = 0.2  # 20% for CV and grid search
-        self.random_state = 42  # Consistent seed across all stages
-        self.stratified = True
-        self.use_rfe = os.getenv('USE_RFE', 'true').lower() == 'true'
-        self.n_jobs = int(os.getenv('N_JOBS', '-1'))
+        self.cv_folds = DEFAULT_CV_FOLDS
+        self.subset_size = DEFAULT_SUBSET_SIZE
+        self.random_state = DEFAULT_RANDOM_STATE
+        self.stratified = DEFAULT_STRATIFIED
+        self.use_rfe = os.getenv(ENV_USE_RFE, str(DEFAULT_USE_RFE)).lower() == 'true'
+        self.n_jobs = int(os.getenv(ENV_N_JOBS, str(DEFAULT_N_JOBS)))
         
         # Models to train
-        self.models = ['logreg', 'svm', 'bayesian', 'xgboost', 'neural_net']
+        self.models = DEFAULT_MODELS.copy()
         
         # Feature engineering
-        self.use_nlp_features = True
-        self.use_embeddings = True
-        self.use_encodings = True
+        self.use_nlp_features = DEFAULT_USE_NLP_FEATURES
+        self.use_embeddings = DEFAULT_USE_EMBEDDINGS
+        self.use_encodings = DEFAULT_USE_ENCODINGS
         
         # Embedding settings
-        self.word2vec_dim = 300
-        self.sentence_transformer_model = 'all-MiniLM-L6-v2'
-        self.bert_model = 'distilbert-base-uncased'
-        self.embedding_aggregation = 'mean'  # mean, max, weighted
+        self.word2vec_dim = DEFAULT_WORD2VEC_DIM
+        self.sentence_transformer_model = DEFAULT_SENTENCE_TRANSFORMER_MODEL
+        self.bert_model = DEFAULT_BERT_MODEL
+        self.embedding_aggregation = DEFAULT_EMBEDDING_AGGREGATION
         
         # Preprocessing
-        self.scale_features = True
-        self.impute_missing = True
-        self.use_pca = True
-        self.pca_components = 0.95  # Keep 95% variance or int for fixed components
-        self.normalize = True
+        self.scale_features = DEFAULT_SCALE_FEATURES
+        self.impute_missing = DEFAULT_IMPUTE_MISSING
+        self.use_pca = DEFAULT_USE_PCA
+        self.pca_components = DEFAULT_PCA_COMPONENTS
+        self.normalize = DEFAULT_NORMALIZE
         
         # Hyperparameter grids
-        self.hyperparameter_grids = self._get_default_hyperparameter_grids()
+        self.hyperparameter_grids = DEFAULT_HYPERPARAMETER_GRIDS.copy()
         
         # Neural network settings
-        self.nn_hidden_layers = [512, 256]
-        self.nn_dropout = 0.3
-        self.nn_learning_rate = 0.001
-        self.nn_batch_size = 32
-        self.nn_epochs = 50
-        self.nn_early_stopping_patience = 5
+        self.nn_hidden_layers = DEFAULT_NN_HIDDEN_LAYERS.copy()
+        self.nn_dropout = DEFAULT_NN_DROPOUT
+        self.nn_learning_rate = DEFAULT_NN_LEARNING_RATE
+        self.nn_batch_size = DEFAULT_NN_BATCH_SIZE
+        self.nn_epochs = DEFAULT_NN_EPOCHS
+        self.nn_early_stopping_patience = DEFAULT_NN_EARLY_STOPPING_PATIENCE
         
         # XGBoost settings
-        self.xgb_tree_method = 'gpu_hist'
-        self.xgb_max_depth = 6
-        self.xgb_learning_rate = 0.1
-        self.xgb_n_estimators = 100
+        self.xgb_tree_method = DEFAULT_XGB_TREE_METHOD
+        self.xgb_max_depth = DEFAULT_XGB_MAX_DEPTH
+        self.xgb_learning_rate = DEFAULT_XGB_LEARNING_RATE
+        self.xgb_n_estimators = DEFAULT_XGB_N_ESTIMATORS
         
         # Parallelization
-        self.n_jobs = -1
-        self.parallel_backend = 'threading'
+        self.n_jobs = DEFAULT_N_JOBS
+        self.parallel_backend = DEFAULT_PARALLEL_BACKEND
         
         # Checkpointing
-        self.save_checkpoints = True
-        self.checkpoint_frequency = 1  # Save every N epochs
-        self.keep_best_n = 3  # Keep best N checkpoints
-        self.delete_existing = os.getenv('DELETE_EXISTING', 'false').lower() == 'true'  # Delete existing checkpoints before starting
+        self.save_checkpoints = DEFAULT_SAVE_CHECKPOINTS
+        self.checkpoint_frequency = DEFAULT_CHECKPOINT_FREQUENCY
+        self.keep_best_n = DEFAULT_KEEP_BEST_N
+        self.delete_existing = os.getenv(ENV_DELETE_EXISTING, 'false').lower() == 'true'
+        
+        # Chunked processing (memory optimization)
+        self.chunk_size = int(os.getenv(ENV_CHUNK_SIZE, str(DEFAULT_CHUNK_SIZE)))
+        self.embedding_batch_size = int(os.getenv(ENV_EMBEDDING_BATCH_SIZE, str(DEFAULT_EMBEDDING_BATCH_SIZE)))
+        self.gradient_accumulation_steps = int(os.getenv(ENV_GRADIENT_ACCUMULATION_STEPS, str(DEFAULT_GRADIENT_ACCUMULATION_STEPS)))
         
         # Logging
-        self.log_level = 'INFO'  # DEBUG, INFO, WARN, ERROR
-        self.log_to_file = True
-        self.log_to_console = True
+        self.log_level = DEFAULT_LOG_LEVEL
+        self.log_to_file = DEFAULT_LOG_TO_FILE
+        self.log_to_console = DEFAULT_LOG_TO_CONSOLE
         
         # Arrow/Parquet settings
-        self.arrow_format = True
-        self.compression = 'snappy'
+        self.arrow_format = DEFAULT_ARROW_FORMAT
+        self.compression = DEFAULT_COMPRESSION
         
     def _load_from_dict(self, config_dict: Dict[str, Any]):
         """Load configuration from dictionary."""
@@ -116,37 +145,7 @@ class Config:
     
     def _get_default_hyperparameter_grids(self) -> Dict[str, Dict[str, List]]:
         """Get default hyperparameter grids for each model."""
-        return {
-            'logreg': {
-                'C': [0.1, 1.0, 10.0],
-                'penalty': ['l1', 'l2', 'elasticnet'],
-                'l1_ratio': [0.1, 0.5, 0.9] if 'elasticnet' in ['l1', 'l2', 'elasticnet'] else [0.5],
-                'class_weight': [None, 'balanced']
-            },
-            'svm': {
-                'C': [0.1, 1.0, 10.0],
-                'kernel': ['linear', 'rbf'],
-                'gamma': ['scale', 'auto', 0.001, 0.01],
-                'class_weight': [None, 'balanced']
-            },
-            'bayesian': {
-                'alpha': [0.1, 0.5, 1.0, 2.0],
-                'fit_prior': [True, False]
-            },
-            'xgboost': {
-                'max_depth': [3, 6, 9],
-                'learning_rate': [0.01, 0.1, 0.3],
-                'n_estimators': [50, 100, 200],
-                'subsample': [0.8, 1.0],
-                'colsample_bytree': [0.8, 1.0]
-            },
-            'neural_net': {
-                'hidden_layers': [[256], [512], [512, 256]],
-                'dropout': [0.2, 0.3, 0.4],
-                'learning_rate': [0.0001, 0.001, 0.01],
-                'batch_size': [16, 32, 64]
-            }
-        }
+        return DEFAULT_HYPERPARAMETER_GRIDS.copy()
     
     def ensure_directories(self):
         """Create necessary directories if they don't exist."""

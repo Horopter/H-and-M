@@ -89,7 +89,7 @@ class GridSearch:
         )
         
         # Extract mean F1 score
-        mean_f1 = cv_results['metrics']['f1']['mean']
+        mean_f1 = cv_results.get('metrics', {}).get('f1', {}).get('mean', 0.0)
         
         result = {
             'params': param_dict,

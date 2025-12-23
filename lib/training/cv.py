@@ -149,10 +149,14 @@ class CrossValidator:
         
         # Train model
         model.fit(X_train, y_train)
+        collect_after_operation("cv_model_fit", aggressive=True)
         
         # Predict
         y_pred = model.predict(X_val)
+        collect_after_operation("cv_model_predict", aggressive=True)
         y_proba = model.predict_proba(X_val)[:, 1] if hasattr(model, 'predict_proba') else None
+        if y_proba is not None:
+            collect_after_operation("cv_model_predict_proba", aggressive=True)
         
         # Calculate metrics
         metrics = {
@@ -300,9 +304,18 @@ class CrossValidator:
                 fold_results.append((fold_id, metrics))
         
         # Aggregate results
+        if not fold_results:
+            self.logger.warning("No fold results to aggregate")
+            return {
+                'n_folds': self.n_splits,
+                'metrics': {},
+                'fold_results': {}
+            }
+        
         all_metrics = {}
+        
         for metric_name in fold_results[0][1].keys():
-            values = [result[1][metric_name] for result in fold_results]
+            values = [result[1].get(metric_name, 0.0) for result in fold_results]
             all_metrics[metric_name] = {
                 'mean': np.mean(values),
                 'std': np.std(values),
@@ -315,8 +328,10 @@ class CrossValidator:
             'fold_results': {fold_id: metrics for fold_id, metrics in fold_results}
         }
         
+        f1_mean = all_metrics.get('f1', {}).get('mean', 0.0)
+        f1_std = all_metrics.get('f1', {}).get('std', 0.0)
         self.logger.info(
-            f"CV Results - F1: {all_metrics['f1']['mean']:.4f} ± {all_metrics['f1']['std']:.4f}"
+            f"CV Results - F1: {f1_mean:.4f} ± {f1_std:.4f}"
         )
         
         return cv_results

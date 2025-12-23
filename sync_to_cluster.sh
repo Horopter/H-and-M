@@ -2,7 +2,7 @@
 # Sync entire project to cluster, deleting remote folder first
 
 REMOTE="santoshd@greatlakes.arc-ts.umich.edu"
-REMOTE_DIR="~/Kaggle_1"
+REMOTE_DIR="/scratch/si670f25_class_root/si670f25_class/santoshd/Kaggle1"
 LOCAL_DIR="/Users/santoshdesai/Documents/Desai_Projects/Kaggle_1"
 
 echo "Deleting remote folder..."
