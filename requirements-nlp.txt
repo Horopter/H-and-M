@@ -1,0 +1,4 @@
+# NLP packages (large - install in compute job)
+sentence-transformers>=2.2.0
+transformers>=4.30.0
+

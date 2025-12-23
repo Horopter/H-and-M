@@ -1,0 +1,24 @@
+# Main requirements file - installs core packages
+# For full installation, use: bash scripts/install_dependencies.sh
+
+# Core dependencies (small packages - install first)
+-r requirements-core.txt
+
+# ML packages (medium size)
+-r requirements-ml.txt
+
+# Statistical analysis packages
+-r requirements-stats.txt
+
+# Visualization packages
+-r requirements-viz.txt
+
+# NOTE: Large packages should be installed separately to avoid memory issues on login nodes:
+#   - torch: Use SLURM job: sbatch scripts/slurm_jobs/slurm_install_large_packages.sh
+#   - transformers/sentence-transformers: Same SLURM job
+
+# GPU acceleration (install via conda or scripts/install_cuml.sh)
+# DO NOT install via pip - use conda or the install script
+# For CUDA 12.1 (Great Lakes): conda install -c rapidsai -c conda-forge -c nvidia cuml cudf python=3.11 cudatoolkit=12.1
+# For CUDA 11.8: conda install -c rapidsai -c conda-forge -c nvidia cuml cudf python=3.11 cudatoolkit=11.8
+# Alternative (pip, less reliable): pip install cuml-cu12 cudf-cu12  # for CUDA 12.x

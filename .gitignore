@@ -1,0 +1,90 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environments
+venv/
+env/
+ENV/
+.venv/
+virtualenv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Runtime directories
+checkpoints/
+logs/
+outputs/
+mlruns/
+.pip-cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Data files (too large for git)
+data/*.csv
+data/*.parquet
+data/*.arrow
+
+# Submission outputs
+submissions/*.csv
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Model files
+*.pkl
+*.joblib
+*.h5
+*.ckpt
+
+# Environment variables
+.env
+.env.local
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.out
+*.err
+
+# SLURM output files
+slurm-*.out
+slurm-*.err
+
