@@ -1,0 +1,40 @@
+# OS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.build/
+dist/
+
+# Environments
+.venv/
+venv/
+env/
+hvsm_venv_*/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Tool caches
+.cache/
+.pip-cache/
+.pytest_cache/
+.mypy_cache/
+
+# Data and artifacts
+/data/
+/outputs/
+/runs/
+/weights/
+/logs/
+*.csv
+*.joblib
+*.pkl
+*.cuml
+
+# Misc
+*.log
+*.tmp

@@ -1,0 +1,59 @@
+Python: /sw/pkgs/arc/python3.11-anaconda/2024.02-1/bin/python
+Papermill: /home/santoshd/.local/bin/papermill
+0.00s - Debugger warning: It seems that frozen modules are being used, which may
+0.00s - make the debugger miss breakpoints. Please pass -Xfrozen_modules=off
+0.00s - to python to disable frozen modules.
+0.00s - Note: Debugging will proceed. Set PYDEVD_DISABLE_FILE_VALIDATION=1 to disable this validation.
+Installed kernelspec hvsm-34667582 in /home/santoshd/.local/share/jupyter/kernels/hvsm-34667582
+0.00s - Debugger warning: It seems that frozen modules are being used, which may
+0.00s - make the debugger miss breakpoints. Please pass -Xfrozen_modules=off
+0.00s - to python to disable frozen modules.
+0.00s - Note: Debugging will proceed. Set PYDEVD_DISABLE_FILE_VALIDATION=1 to disable this validation.
+Available kernels:
+  hvsm-34589494    /home/santoshd/.local/share/jupyter/kernels/hvsm-34589494
+  hvsm-34667582    /home/santoshd/.local/share/jupyter/kernels/hvsm-34667582
+  python3          /sw/pkgs/arc/python3.11-anaconda/2024.02-1/share/jupyter/kernels/python3
+Input Notebook:  hvsm_colab.ipynb
+Output Notebook: hvsm_colab_output.ipynb
+Executing:   0%|          | 0/29 [00:00<?, ?cell/s]Executing notebook with kernel: hvsm-34667582
+Executing:   3%|▎         | 1/29 [00:01<00:49,  1.76s/cell]Executing:  10%|█         | 3/29 [00:06<01:01,  2.38s/cell]Executing:  17%|█▋        | 5/29 [00:18<01:36,  4.04s/cell]Executing:  17%|█▋        | 5/29 [00:21<01:42,  4.27s/cell]
+Traceback (most recent call last):
+  File "/home/santoshd/.local/bin/papermill", line 8, in <module>
+    sys.exit(papermill())
+             ^^^^^^^^^^^
+  File "/sw/pkgs/arc/python3.11-anaconda/2024.02-1/lib/python3.11/site-packages/click/core.py", line 1157, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/sw/pkgs/arc/python3.11-anaconda/2024.02-1/lib/python3.11/site-packages/click/core.py", line 1078, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/sw/pkgs/arc/python3.11-anaconda/2024.02-1/lib/python3.11/site-packages/click/core.py", line 1434, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/sw/pkgs/arc/python3.11-anaconda/2024.02-1/lib/python3.11/site-packages/click/core.py", line 783, in invoke
+    return __callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/sw/pkgs/arc/python3.11-anaconda/2024.02-1/lib/python3.11/site-packages/click/decorators.py", line 33, in new_func
+    return f(get_current_context(), *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/santoshd/.local/lib/python3.11/site-packages/papermill/cli.py", line 235, in papermill
+    execute_notebook(
+  File "/home/santoshd/.local/lib/python3.11/site-packages/papermill/execute.py", line 131, in execute_notebook
+    raise_for_execution_errors(nb, output_path)
+  File "/home/santoshd/.local/lib/python3.11/site-packages/papermill/execute.py", line 251, in raise_for_execution_errors
+    raise error
+papermill.exceptions.PapermillExecutionError: 
+---------------------------------------------------------------------------
+Exception encountered at "In [2]":
+---------------------------------------------------------------------------
+ModuleNotFoundError                       Traceback (most recent call last)
+Cell In[2], line 27
+     25 import nltk
+     26 from nltk.sentiment import SentimentIntensityAnalyzer
+---> 27 import spacy
+     28 from wordfreq import zipf_frequency
+     29 import textstat
+
+ModuleNotFoundError: No module named 'spacy'
+
+Removed /home/santoshd/.local/share/jupyter/kernels/hvsm-34667582
