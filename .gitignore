@@ -11,26 +11,36 @@ dist/
 
 # Environments
 .venv/
+.venv-*/
 venv/
 env/
 hvsm_venv_*/
+
+# Hidden files
+.env
+.env.*
+.python-version
+.tool-versions
+.vscode/
+.idea/
+.ruff_cache/
 
 # Jupyter
 .ipynb_checkpoints/
 
 # Tool caches
 .cache/
+.cache/pip/
+.pip/
 .pip-cache/
 .pytest_cache/
 .mypy_cache/
 
 # Data and artifacts
-/data/
 /outputs/
 /runs/
 /weights/
 /logs/
-*.csv
 *.joblib
 *.pkl
 *.cuml
