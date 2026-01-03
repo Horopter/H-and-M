@@ -1,12 +1,12 @@
 #!/bin/bash
 #SBATCH --job-name=hvsm_job_2
-#SBATCH --account=eecs442f25_class
+#SBATCH --account=si670f25_class
 #SBATCH --partition=gpu
 #SBATCH --gpus=1
 #SBATCH --requeue
-#SBATCH --time=8:00:00
+#SBATCH --time=15:00:00
 #SBATCH --mem=64G
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=1
 #SBATCH --output=logs/%x-%j.out
 #SBATCH --error=logs/%x-%j.err
 #SBATCH --mail-user=santoshd@umich.edu
