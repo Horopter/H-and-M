@@ -3,8 +3,6 @@
 #SBATCH --account=eecs442f25_class
 #SBATCH --partition=gpu
 #SBATCH --gpus=1
-#SBATCH --gres-flags=enforce-binding
-#SBATCH --exclusive
 #SBATCH --requeue
 #SBATCH --time=8:00:00
 #SBATCH --mem=64G
@@ -20,7 +18,6 @@ umask 077
 
 module purge
 module load python3.11-anaconda/2024.02
-module load cuda/12.1 || true
 
 PROJECT_ROOT="${SLURM_SUBMIT_DIR:-$PWD}"
 cd "$PROJECT_ROOT"
@@ -32,10 +29,7 @@ export PIP_CACHE_DIR="$PWD/.pip-cache"
 export WORK_DIR="${SLURM_TMPDIR:-$PWD}"
 export DATA_DIR="${PROJECT_ROOT}/data"
 export PYTHONPATH="${PROJECT_ROOT}/tools:${PYTHONPATH:-}"
-export HVSM_ENABLE_RMM=1
-export HVSM_RMM_CUPY=0
-export RMM_MANAGED_MEMORY=1
-export RMM_POOL=1
+export HVSM_ENABLE_RMM=0
 
 
 export VENV_DIR="${HVSM_VENV_DIR:-$PROJECT_ROOT/hvsm_venv_shared}"
@@ -68,18 +62,6 @@ echo "Host:        $(hostname)"
 echo "Date:        $(date -Is)"
 echo "SLURM_JOBID: ${SLURM_JOB_ID:-none}"
 echo "CUDA_HOME:   ${CUDA_HOME:-none}"
-if ! command -v nvidia-smi >/dev/null; then
-  echo "No nvidia-smi; GPU node required." >&2
-  exit 1
-fi
-nvidia-smi || { echo "nvidia-smi failed; GPU unavailable." >&2; exit 1; }
-GPU_LIST="${SLURM_JOB_GPUS:-${SLURM_STEP_GPUS:-}}"
-if [ -n "$GPU_LIST" ]; then
-  export CUDA_VISIBLE_DEVICES="$GPU_LIST"
-  export NVIDIA_VISIBLE_DEVICES="$GPU_LIST"
-fi
-echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-unset}"
-
 
 LOCK_FILE="$VENV_DIR/.pip.lock"
 if command -v flock >/dev/null; then
@@ -104,13 +86,8 @@ run(sys.executable, "-m", "pip", "install", "-q", *BASE_REQS)
 run(sys.executable, "-m", "pip", "install", "-q",
     "https://github.com/explosion/spacy-models/releases/download/"
     "en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl")
-def which(x): return shutil.which(x) is not None
-cuda_tag=None
-if which("nvidia-smi"):
-    if os.environ.get("CUDA_HOME","").endswith("/12.1"): cuda_tag="cu121"
-    elif os.environ.get("CUDA_HOME","").endswith("/11.8"): cuda_tag="cu118"
-idx=(f"https://download.pytorch.org/whl/{cuda_tag}" if cuda_tag else
-    "https://download.pytorch.org/whl/cpu")
+cuda_tag = None
+idx = "https://download.pytorch.org/whl/cpu"
 run(sys.executable, "-m", "pip", "install", "-q", "--index-url", idx,
     "torch", "torchvision", "torchaudio")
 run(sys.executable, "-m", "pip", "check")
@@ -125,43 +102,6 @@ fi
 if command -v flock >/dev/null; then
   flock -u 200
   exec 200>&-
-fi
-
-MAX_REQUEUES="${HVSM_MAX_REQUEUES:-2}"
-RESTART_COUNT="${SLURM_RESTART_COUNT:-0}"
-if ! python - <<'PY'
-import time
-try:
-    import cupy as cp
-except Exception as exc:
-    raise SystemExit(f"GPU preflight failed: cupy import error: {exc}")
-for attempt in range(3):
-    try:
-        _ = cp.cuda.runtime.getDeviceCount()
-        cp.cuda.Device(0).use()
-        x = cp.zeros((1,), dtype=cp.float32)
-        _ = float(x.sum().get())
-        print("GPU preflight OK", flush=True)
-        break
-    except Exception as exc:
-        print(f"GPU preflight failed (attempt {attempt+1}/3): {exc}", flush=True)
-        if attempt == 2:
-            raise SystemExit(1)
-        time.sleep(10)
-PY
-then
-  if [ -n "${SLURM_JOB_ID:-}" ] && command -v scontrol >/dev/null; then
-    if [ "${RESTART_COUNT}" -lt "${MAX_REQUEUES}" ]; then
-      ATTEMPT=$((RESTART_COUNT + 1))
-      echo "GPU preflight failed; requeuing ${SLURM_JOB_ID} (attempt ${ATTEMPT}/${MAX_REQUEUES})." >&2
-      if scontrol requeue "${SLURM_JOB_ID}"; then
-        exit 0
-      fi
-      echo "scontrol requeue failed; exiting." >&2
-    fi
-  fi
-  echo "GPU preflight failed; not requeueing." >&2
-  exit 1
 fi
 
 KNAME="hvsm-${SLURM_JOB_ID:-$$}"

@@ -3,8 +3,6 @@
 #SBATCH --account=eecs442f25_class
 #SBATCH --partition=gpu
 #SBATCH --gpus=1
-#SBATCH --gres-flags=enforce-binding
-#SBATCH --exclusive
 #SBATCH --requeue
 #SBATCH --time=8:00:00
 #SBATCH --mem=64G
@@ -73,10 +71,36 @@ if ! command -v nvidia-smi >/dev/null; then
   exit 1
 fi
 nvidia-smi || { echo "nvidia-smi failed; GPU unavailable." >&2; exit 1; }
-GPU_LIST="${SLURM_JOB_GPUS:-${SLURM_STEP_GPUS:-}}"
-if [ -n "$GPU_LIST" ]; then
-  export CUDA_VISIBLE_DEVICES="$GPU_LIST"
-  export NVIDIA_VISIBLE_DEVICES="$GPU_LIST"
+GPU_INDICES="$(nvidia-smi --query-gpu=index --format=csv,noheader 2>/dev/null | tr -d " " | paste -sd, -)"
+if [ -z "$GPU_INDICES" ]; then
+  echo "No GPUs detected by nvidia-smi." >&2
+  exit 1
+fi
+if [ -n "${CUDA_VISIBLE_DEVICES:-}" ]; then
+  INVALID=0
+  IFS="," read -r -a REQ <<< "${CUDA_VISIBLE_DEVICES}"
+  for gid in "${REQ[@]}"; do
+    if ! echo ",${GPU_INDICES}," | grep -q ",${gid},"; then
+      INVALID=1
+      break
+    fi
+  done
+  if [ "$INVALID" -eq 1 ]; then
+    echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES} invalid for host GPUs ${GPU_INDICES}; resetting." >&2
+    unset CUDA_VISIBLE_DEVICES NVIDIA_VISIBLE_DEVICES
+  fi
+fi
+if [ -z "${CUDA_VISIBLE_DEVICES:-}" ]; then
+  GPU_LIST="${SLURM_STEP_GPUS:-${SLURM_JOB_GPUS:-}}"
+  if [ -n "$GPU_LIST" ]; then
+    GPU_LIST_CLEAN="$(echo "$GPU_LIST" | tr -cd "0-9,")"
+  else
+    GPU_LIST_CLEAN="$GPU_INDICES"
+  fi
+  if [ -n "$GPU_LIST_CLEAN" ]; then
+    export CUDA_VISIBLE_DEVICES="$GPU_LIST_CLEAN"
+    export NVIDIA_VISIBLE_DEVICES="$GPU_LIST_CLEAN"
+  fi
 fi
 echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-unset}"
 
