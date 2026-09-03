@@ -96,6 +96,12 @@ def main():
         action='store_true',
         help='Run statistical analyses (ANOVA, Tukey HSD, UMAP)'
     )
+    parser.add_argument(
+        '--resume-from-stage',
+        type=int,
+        default=None,
+        help='Resume pipeline from this stage number (1-7)'
+    )
     
     args = parser.parse_args()
     
@@ -112,7 +118,8 @@ def main():
         'models': args.models,
         'use_gpu': args.use_gpu,
         'subset_size': args.subset_size,
-        'cv_folds': args.cv_folds
+        'cv_folds': args.cv_folds,
+        'resume_from_stage': args.resume_from_stage
     }
     
     config = Config(config_dict)
@@ -263,4 +270,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

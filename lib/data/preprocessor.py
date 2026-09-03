@@ -2,6 +2,7 @@
 Scaling, imputation, PCA, normalization using CUML for GPU acceleration.
 """
 import numpy as np
+from scipy import sparse as sp
 from typing import Optional, Union, Tuple
 from abc import ABC, abstractmethod
 
@@ -75,7 +76,15 @@ class Scaler(BasePreprocessor):
     def fit(self, X):
         """Fit the scaler."""
         self.logger.debug("Fitting StandardScaler")
+        self.logger.debug("Scaler input type=%s shape=%s", type(X).__name__, getattr(X, "shape", None))
         X_gpu = to_gpu_if_needed(X, self.use_gpu and CUML_AVAILABLE, sparse_to_dense=False)
+        if sp.issparse(X_gpu) and self.with_mean:
+            self.logger.warning("Sparse input detected; disabling mean-centering for scaler.")
+            self.with_mean = False
+            if self.use_gpu and CUML_AVAILABLE:
+                self.scaler = CUMLStandardScaler(with_mean=False, with_std=self.with_std)
+            else:
+                self.scaler = StandardScaler(with_mean=False, with_std=self.with_std)
         self.scaler.fit(X_gpu)
         del X_gpu
         if self.use_gpu and CUML_AVAILABLE:
@@ -89,6 +98,7 @@ class Scaler(BasePreprocessor):
             raise ValueError("Scaler must be fitted before transform")
         
         self.logger.debug("Transforming with StandardScaler")
+        self.logger.debug("Scaler transform input type=%s shape=%s", type(X).__name__, getattr(X, "shape", None))
         X_gpu = to_gpu_if_needed(X, self.use_gpu and CUML_AVAILABLE, sparse_to_dense=False)
         result = self.scaler.transform(X_gpu)
         del X_gpu
@@ -114,6 +124,7 @@ class MinMaxScaler(BasePreprocessor):
     def fit(self, X):
         """Fit the scaler."""
         self.logger.debug("Fitting MinMaxScaler")
+        self.logger.debug("MinMaxScaler input type=%s shape=%s", type(X).__name__, getattr(X, "shape", None))
         X_gpu = to_gpu_if_needed(X, self.use_gpu and CUML_AVAILABLE, sparse_to_dense=False)
         self.scaler.fit(X_gpu)
         self._fitted = True
@@ -125,6 +136,7 @@ class MinMaxScaler(BasePreprocessor):
             raise ValueError("Scaler must be fitted before transform")
         
         self.logger.debug("Transforming with MinMaxScaler")
+        self.logger.debug("MinMaxScaler transform input type=%s shape=%s", type(X).__name__, getattr(X, "shape", None))
         X_gpu = to_gpu_if_needed(X, self.use_gpu and CUML_AVAILABLE, sparse_to_dense=False)
         result = self.scaler.transform(X_gpu)
         return from_gpu_if_needed(result)
@@ -158,6 +170,7 @@ class Imputer(BasePreprocessor):
     def fit(self, X):
         """Fit the imputer."""
         self.logger.debug(f"Fitting Imputer with strategy={self.strategy}")
+        self.logger.debug("Imputer input type=%s shape=%s", type(X).__name__, getattr(X, "shape", None))
         X_gpu = to_gpu_if_needed(X, self.use_gpu and CUML_AVAILABLE, sparse_to_dense=False)
         self.imputer.fit(X_gpu)
         self._fitted = True
@@ -169,6 +182,7 @@ class Imputer(BasePreprocessor):
             raise ValueError("Imputer must be fitted before transform")
         
         self.logger.debug("Transforming with Imputer")
+        self.logger.debug("Imputer transform input type=%s shape=%s", type(X).__name__, getattr(X, "shape", None))
         X_gpu = to_gpu_if_needed(X, self.use_gpu and CUML_AVAILABLE, sparse_to_dense=False)
         result = self.imputer.transform(X_gpu)
         return from_gpu_if_needed(result)
@@ -214,6 +228,7 @@ class PCAReducer(BasePreprocessor):
     def fit(self, X):
         """Fit the PCA reducer."""
         self.logger.debug(f"Fitting PCA with n_components={self.n_components}")
+        self.logger.debug("PCA input type=%s shape=%s", type(X).__name__, getattr(X, "shape", None))
         X_gpu = to_gpu_if_needed(X, self.use_gpu and CUML_AVAILABLE, sparse_to_dense=False)
         self.reducer.fit(X_gpu)
         del X_gpu
@@ -228,6 +243,7 @@ class PCAReducer(BasePreprocessor):
             raise ValueError("PCA must be fitted before transform")
         
         self.logger.debug("Transforming with PCA")
+        self.logger.debug("PCA transform input type=%s shape=%s", type(X).__name__, getattr(X, "shape", None))
         X_gpu = to_gpu_if_needed(X, self.use_gpu and CUML_AVAILABLE, sparse_to_dense=False)
         result = self.reducer.transform(X_gpu)
         del X_gpu
@@ -259,6 +275,7 @@ class DataNormalizer(BasePreprocessor):
     def fit(self, X):
         """Fit the normalizer (no-op for normalizers)."""
         self.logger.debug(f"Fitting Normalizer with norm={self.norm}")
+        self.logger.debug("Normalizer input type=%s shape=%s", type(X).__name__, getattr(X, "shape", None))
         # Normalizer doesn't need fit, but we check GPU availability
         self._fitted = True
         return self
@@ -269,6 +286,7 @@ class DataNormalizer(BasePreprocessor):
             raise ValueError("Normalizer must be fitted before transform")
         
         self.logger.debug("Transforming with Normalizer")
+        self.logger.debug("Normalizer transform input type=%s shape=%s", type(X).__name__, getattr(X, "shape", None))
         X_gpu = to_gpu_if_needed(X, self.use_gpu and CUML_AVAILABLE, sparse_to_dense=False)
         result = self.normalizer.transform(X_gpu)
         return from_gpu_if_needed(result)
@@ -295,8 +313,10 @@ class PreprocessingPipeline:
         X_transformed = X
         for name, preprocessor in self.steps:
             self.logger.debug(f"Fitting {name}")
+            self.logger.debug("Pipeline step %s input type=%s shape=%s", name, type(X_transformed).__name__, getattr(X_transformed, "shape", None))
             preprocessor.fit(X_transformed)
             X_transformed = preprocessor.transform(X_transformed)
+            self.logger.debug("Pipeline step %s output type=%s shape=%s", name, type(X_transformed).__name__, getattr(X_transformed, "shape", None))
         return self
     
     def transform(self, X):
@@ -304,10 +324,11 @@ class PreprocessingPipeline:
         self.logger.debug("Transforming through preprocessing pipeline")
         X_transformed = X
         for name, preprocessor in self.steps:
+            self.logger.debug("Pipeline step %s input type=%s shape=%s", name, type(X_transformed).__name__, getattr(X_transformed, "shape", None))
             X_transformed = preprocessor.transform(X_transformed)
+            self.logger.debug("Pipeline step %s output type=%s shape=%s", name, type(X_transformed).__name__, getattr(X_transformed, "shape", None))
         return X_transformed
     
     def fit_transform(self, X):
         """Fit and transform in one step."""
         return self.fit(X).transform(X)
-

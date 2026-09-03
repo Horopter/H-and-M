@@ -44,6 +44,8 @@ DEFAULT_RANDOM_STATE = 42
 DEFAULT_STRATIFIED = True
 DEFAULT_USE_RFE = True
 DEFAULT_N_JOBS = -1
+DEFAULT_SKIP_SVM = False
+DEFAULT_SKIP_NEURAL_NET = False
 
 # ============================================================================
 # MODEL NAMES
@@ -68,6 +70,7 @@ DEFAULT_MODELS: List[str] = [
 DEFAULT_USE_NLP_FEATURES = True
 DEFAULT_USE_EMBEDDINGS = True
 DEFAULT_USE_ENCODINGS = True
+DEFAULT_DEFER_EMBEDDING_UNION = True
 
 # ============================================================================
 # EMBEDDING SETTINGS
@@ -83,7 +86,7 @@ DEFAULT_EMBEDDING_AGGREGATION = 'mean'  # mean, max, weighted
 DEFAULT_SCALE_FEATURES = True
 DEFAULT_IMPUTE_MISSING = True
 DEFAULT_USE_PCA = True
-DEFAULT_PCA_COMPONENTS = 0.95  # Keep 95% variance or int for fixed components
+DEFAULT_PCA_COMPONENTS = 0.9  # Keep 90% variance or int for fixed components
 DEFAULT_NORMALIZE = True
 
 # ============================================================================
@@ -117,9 +120,16 @@ DEFAULT_CHECKPOINT_FREQUENCY = 1
 DEFAULT_KEEP_BEST_N = 3
 
 # ============================================================================
+# SUBMISSION SETTINGS
+# ============================================================================
+DEFAULT_SUBMISSION_USE_PROBA = True
+DEFAULT_SUBMISSION_THRESHOLD = 0.5
+
+# ============================================================================
 # CHUNKED PROCESSING (MEMORY OPTIMIZATION)
 # ============================================================================
 DEFAULT_CHUNK_SIZE = 1000
+DEFAULT_TFIDF_CHUNK_SIZE = 250
 DEFAULT_EMBEDDING_BATCH_SIZE = 32
 DEFAULT_GRADIENT_ACCUMULATION_STEPS = 4
 
@@ -140,14 +150,14 @@ DEFAULT_COMPRESSION = 'snappy'
 # HYPERPARAMETER GRIDS
 # ============================================================================
 HYPERPARAMETER_GRID_LOGREG: Dict[str, List[Any]] = {
-    'C': [0.1, 1.0, 10.0],
+    'C': [0.01, 0.1, 1.0],
     'penalty': ['l1', 'l2', 'elasticnet'],
     'l1_ratio': [0.1, 0.5, 0.9],
     'class_weight': [None, 'balanced']
 }
 
 HYPERPARAMETER_GRID_SVM: Dict[str, List[Any]] = {
-    'C': [0.1, 1.0, 10.0],
+    'C': [0.01, 0.1, 1.0],
     'kernel': ['linear', 'rbf'],
     'gamma': ['scale', 'auto', 0.001, 0.01],
     'class_weight': [None, 'balanced']
@@ -195,7 +205,14 @@ ENV_NUM_GPUS = 'NUM_GPUS'
 ENV_USE_RFE = 'USE_RFE'
 ENV_N_JOBS = 'N_JOBS'
 ENV_DELETE_EXISTING = 'DELETE_EXISTING'
+ENV_DEFER_EMBEDDING_UNION = 'DEFER_EMBEDDING_UNION'
+ENV_SKIP_SVM = 'SKIP_SVM'
+ENV_SKIP_NEURAL_NET = 'SKIP_NEURAL_NET'
+ENV_XGB_TREE_METHOD = 'XGB_TREE_METHOD'
+ENV_SUBMISSION_USE_PROBA = 'SUBMISSION_USE_PROBA'
+ENV_SUBMISSION_THRESHOLD = 'SUBMISSION_THRESHOLD'
 ENV_CHUNK_SIZE = 'CHUNK_SIZE'
+ENV_TFIDF_CHUNK_SIZE = 'TFIDF_CHUNK_SIZE'
 ENV_EMBEDDING_BATCH_SIZE = 'EMBEDDING_BATCH_SIZE'
 ENV_GRADIENT_ACCUMULATION_STEPS = 'GRADIENT_ACCUMULATION_STEPS'
 
@@ -206,4 +223,3 @@ SEPARATOR_LINE = "=" * 80
 EMBEDDING_AGGREGATION_MEAN = 'mean'
 EMBEDDING_AGGREGATION_MAX = 'max'
 EMBEDDING_AGGREGATION_WEIGHTED = 'weighted'
-

@@ -108,6 +108,36 @@ class DuckDBReporter:
         """, [experiment_id, experiment_name, datetime.now(), json.dumps(config)])
         
         self.logger.info(f"Logged experiment: {experiment_id}")
+
+    def _ensure_experiment(
+        self,
+        experiment_id: str,
+        experiment_name: Optional[str] = None,
+        config: Optional[Dict[str, Any]] = None
+    ):
+        """Ensure experiment exists to satisfy foreign key constraints."""
+        if not self.enabled:
+            return
+        exists = self.conn.execute(
+            "SELECT 1 FROM experiments WHERE experiment_id = ? LIMIT 1",
+            [experiment_id]
+        ).fetchone()
+        if exists:
+            return
+        name = experiment_name or experiment_id
+        cfg = config or self.config.to_dict()
+        self.logger.warning(
+            "Experiment %s not found; creating placeholder entry for logging.",
+            experiment_id
+        )
+        self.log_experiment(experiment_id, name, cfg)
+
+    def _next_id(self, table: str, id_column: str) -> int:
+        """Get next integer ID for a table primary key."""
+        row = self.conn.execute(
+            f"SELECT COALESCE(MAX({id_column}), 0) + 1 FROM {table}"
+        ).fetchone()
+        return int(row[0]) if row else 1
     
     def log_cv_results(
         self,
@@ -118,17 +148,20 @@ class DuckDBReporter:
         """Log cross-validation results."""
         if not self.enabled:
             return
+        self._ensure_experiment(experiment_id)
         
         fold_results = cv_results.get('fold_results', {})
+        next_id = self._next_id("cv_results", "cv_id")
         
         for fold_id, metrics in fold_results.items():
             self.conn.execute("""
                 INSERT INTO cv_results (
-                    experiment_id, model_type, fold_id,
+                    cv_id, experiment_id, model_type, fold_id,
                     f1_score, accuracy, precision, recall, roc_auc, timestamp
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, [
+                next_id,
                 experiment_id,
                 model_type,
                 int(fold_id),
@@ -139,6 +172,7 @@ class DuckDBReporter:
                 metrics.get('roc_auc', 0.0),
                 datetime.now()
             ])
+            next_id += 1
         
         self.logger.info(f"Logged CV results for {model_type}")
     
@@ -153,15 +187,18 @@ class DuckDBReporter:
         """Log metrics."""
         if not self.enabled:
             return
+        self._ensure_experiment(experiment_id)
+        next_id = self._next_id("model_results", "result_id")
         
         for metric_name, metric_value in metrics.items():
             self.conn.execute("""
                 INSERT INTO model_results (
-                    experiment_id, model_type, fold_id, metric_name,
+                    result_id, experiment_id, model_type, fold_id, metric_name,
                     metric_value, epoch, timestamp
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, [
+                next_id,
                 experiment_id,
                 model_type,
                 fold_id,
@@ -170,6 +207,7 @@ class DuckDBReporter:
                 epoch,
                 datetime.now()
             ])
+            next_id += 1
     
     def generate_report(
         self,
@@ -257,4 +295,3 @@ class DuckDBReporter:
         """Close database connection."""
         if self.enabled:
             self.conn.close()
-

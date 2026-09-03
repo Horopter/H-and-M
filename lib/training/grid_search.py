@@ -5,6 +5,11 @@ import numpy as np
 from typing import Dict, List, Any, Callable, Optional
 from itertools import product
 from scipy.sparse import csr_matrix
+import hashlib
+import json
+from pathlib import Path
+
+from ..checkpointing.checkpoint_manager import CheckpointManager
 
 from ..config import get_config
 from ..logging.logger import get_logger
@@ -74,8 +79,38 @@ class GridSearch:
         """
         self.logger.debug(f"Evaluating parameters: {param_dict}")
         
+        param_payload = json.dumps(param_dict, sort_keys=True, default=str)
+        param_hash = hashlib.md5(param_payload.encode('utf-8')).hexdigest()[:8]
+        checkpoint_tag = f"grid_{param_hash}"
+        checkpoint_metadata = {
+            'params': param_dict,
+            'param_hash': param_hash
+        }
+        
         # Create model with parameters
         model = model_factory(**param_dict)
+        if cv_folds and self.cv.n_splits != cv_folds:
+            self.cv.n_splits = cv_folds
+
+        cached_results = self._load_cached_cv_results(
+            model.__class__.__name__,
+            checkpoint_tag,
+            self.cv.n_splits
+        )
+        if cached_results is not None:
+            mean_f1 = cached_results.get('metrics', {}).get('f1', {}).get('mean', 0.0)
+            self.logger.info(
+                "Loaded cached CV results for %s (%s) - Mean F1: %.4f",
+                model.__class__.__name__,
+                checkpoint_tag,
+                mean_f1
+            )
+            return {
+                'params': param_dict,
+                'mean_f1': mean_f1,
+                'cv_results': cached_results,
+                'cached': True
+            }
         
         # Perform CV with random sampling (not temporal)
         cv_results = self.cv.cross_validate(
@@ -85,7 +120,11 @@ class GridSearch:
             subset_size=subset_size,
             temporal=False,  # Random sampling for CV
             parallel=False,
-            original_data_size=original_data_size
+            original_data_size=original_data_size,
+            save_checkpoints=True,
+            checkpoint_tag=checkpoint_tag,
+            checkpoint_metadata=checkpoint_metadata,
+            checkpoint_data=True
         )
         
         # Extract mean F1 score
@@ -100,6 +139,50 @@ class GridSearch:
         self.logger.info(f"Parameters {param_dict} - Mean F1: {mean_f1:.4f}")
         
         return result
+
+    def _load_cached_cv_results(
+        self,
+        model_type: str,
+        checkpoint_tag: str,
+        n_splits: int
+    ) -> Optional[Dict[str, Any]]:
+        checkpoint_mgr = CheckpointManager(self.config)
+        base_dir = Path(checkpoint_mgr.checkpoint_dir) / model_type / checkpoint_tag
+        fold_results = {}
+
+        for fold_id in range(n_splits):
+            meta_path = base_dir / f"fold_{fold_id}" / "metadata.json"
+            if not meta_path.exists():
+                return None
+            try:
+                with open(meta_path, 'r') as f:
+                    meta = json.load(f)
+                metrics = meta.get('metrics', {})
+                if not metrics:
+                    return None
+                fold_results[fold_id] = metrics
+            except Exception:
+                return None
+
+        metric_names = set()
+        for metrics in fold_results.values():
+            metric_names.update(metrics.keys())
+
+        all_metrics = {}
+        for metric_name in metric_names:
+            values = [fold_results[fid].get(metric_name, 0.0) for fid in sorted(fold_results)]
+            all_metrics[metric_name] = {
+                'mean': float(np.mean(values)),
+                'std': float(np.std(values)),
+                'values': values
+            }
+
+        return {
+            'n_folds': n_splits,
+            'metrics': all_metrics,
+            'fold_results': fold_results,
+            'cached': True
+        }
     
     def search(
         self,
@@ -194,4 +277,3 @@ class GridSearch:
         
         self.logger.info(f"Created model with best parameters: {best_params}")
         return model
-

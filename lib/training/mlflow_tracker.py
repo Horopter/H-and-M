@@ -61,6 +61,11 @@ class MLFlowTracker:
         """Log parameters."""
         if self.enabled:
             mlflow.log_params(params)
+
+    def log_param(self, key: str, value: Any):
+        """Log a single parameter."""
+        if self.enabled:
+            mlflow.log_param(key, value)
     
     def log_metrics(self, metrics: Dict[str, float], step: Optional[int] = None):
         """Log metrics."""
@@ -173,4 +178,3 @@ class MLFlowTracker:
         
         plt.close(fig)
         return fig
-

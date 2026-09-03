@@ -21,6 +21,8 @@ logger = get_logger(__name__)
 
 class XGBoostModel(BaseModel):
     """XGBoost model with GPU support."""
+    _GPU_TREE_METHOD_SUPPORTED: Optional[bool] = None
+    _GPU_TREE_METHOD_LOGGED: bool = False
     
     def __init__(
         self,
@@ -30,7 +32,7 @@ class XGBoostModel(BaseModel):
         n_estimators: int = 100,
         subsample: float = 1.0,
         colsample_bytree: float = 1.0,
-        tree_method: str = 'gpu_hist',
+        tree_method: Optional[str] = None,
         **kwargs
     ):
         """
@@ -57,28 +59,20 @@ class XGBoostModel(BaseModel):
         self.subsample = subsample
         self.colsample_bytree = colsample_bytree
         
+        if tree_method is None:
+            tree_method = getattr(self.config, "xgb_tree_method", "gpu_hist")
+
         # Use GPU if available and configured
         if self.use_gpu:
             tree_method = tree_method or 'gpu_hist'
         else:
             tree_method = 'hist'
+
+        tree_method = self._resolve_tree_method(tree_method)
         
         self.tree_method = tree_method
         self.kwargs = kwargs
-        
-        # Initialize model
-        self.model = xgb.XGBClassifier(
-            max_depth=max_depth,
-            learning_rate=learning_rate,
-            n_estimators=n_estimators,
-            subsample=subsample,
-            colsample_bytree=colsample_bytree,
-            tree_method=tree_method,
-            use_label_encoder=False,
-            eval_metric='logloss',
-            **kwargs
-        )
-        
+        self.model = self._build_model(tree_method)
         self.logger.info(f"Initialized XGBoost with tree_method={tree_method}")
     
     def fit(self, X, y, **kwargs):
@@ -87,16 +81,87 @@ class XGBoostModel(BaseModel):
         
         # XGBoost can handle sparse matrices directly
         # Convert to DMatrix for efficiency if needed
-        if isinstance(X, csr_matrix):
-            # XGBoost works with sparse matrices
-            self.model.fit(X, y, **kwargs)
-        else:
-            self.model.fit(X, y, **kwargs)
+        try:
+            if isinstance(X, csr_matrix):
+                # XGBoost works with sparse matrices
+                self.model.fit(X, y, **kwargs)
+            else:
+                self.model.fit(X, y, **kwargs)
+        except Exception as e:
+            if self.tree_method == 'gpu_hist' and "gpu_hist" in str(e):
+                if not self.__class__._GPU_TREE_METHOD_LOGGED:
+                    self.logger.warning("XGBoost GPU tree_method failed; retrying with 'hist'. error=%s", e)
+                    self.__class__._GPU_TREE_METHOD_LOGGED = True
+                self.__class__._GPU_TREE_METHOD_SUPPORTED = False
+                self.tree_method = 'hist'
+                self.use_gpu = False
+                self.model = self._build_model(self.tree_method)
+                if isinstance(X, csr_matrix):
+                    self.model.fit(X, y, **kwargs)
+                else:
+                    self.model.fit(X, y, **kwargs)
+            else:
+                raise
         
         self._fitted = True
         
         self.logger.info("XGBoost model fitted")
         return self
+
+    def _build_model(self, tree_method: str):
+        """Build XGBoost classifier with current hyperparameters."""
+        filtered_kwargs = dict(self.kwargs)
+        filtered_kwargs.pop('use_label_encoder', None)
+        return xgb.XGBClassifier(
+            max_depth=self.max_depth,
+            learning_rate=self.learning_rate,
+            n_estimators=self.n_estimators,
+            subsample=self.subsample,
+            colsample_bytree=self.colsample_bytree,
+            tree_method=tree_method,
+            eval_metric='logloss',
+            **filtered_kwargs
+        )
+
+    @classmethod
+    def _resolve_tree_method(cls, tree_method: str) -> str:
+        if tree_method != 'gpu_hist':
+            return tree_method
+        support = cls._detect_gpu_support()
+        if support is False:
+            if not cls._GPU_TREE_METHOD_LOGGED:
+                logger.warning("XGBoost build lacks CUDA support; forcing tree_method='hist'")
+                cls._GPU_TREE_METHOD_LOGGED = True
+            return 'hist'
+        return tree_method
+
+    @classmethod
+    def _detect_gpu_support(cls) -> Optional[bool]:
+        if cls._GPU_TREE_METHOD_SUPPORTED is not None:
+            return cls._GPU_TREE_METHOD_SUPPORTED
+        support = None
+        try:
+            if hasattr(xgb, "build_info"):
+                info = xgb.build_info()
+                if isinstance(info, dict):
+                    use_cuda = info.get("USE_CUDA")
+                    if use_cuda is None and "build_info" in info and isinstance(info["build_info"], dict):
+                        use_cuda = info["build_info"].get("USE_CUDA")
+                    if use_cuda is not None:
+                        if isinstance(use_cuda, str):
+                            support = use_cuda.strip().lower() in ("1", "true", "on", "yes")
+                        else:
+                            support = bool(use_cuda)
+        except Exception:
+            support = None
+        if support is None:
+            try:
+                if hasattr(xgb.core, "_has_cuda_support"):
+                    support = bool(xgb.core._has_cuda_support())
+            except Exception:
+                support = None
+        cls._GPU_TREE_METHOD_SUPPORTED = support
+        return support
     
     def predict(self, X) -> np.ndarray:
         """Predict class labels."""
@@ -163,4 +228,3 @@ class XGBoostModel(BaseModel):
         
         logger.info("Model loaded")
         return model
-

@@ -3,7 +3,10 @@ GPU utility functions for efficient CUML/cuDF conversions.
 """
 from typing import Union, Optional
 from scipy.sparse import csr_matrix
+from scipy import sparse as sp
 import numpy as np
+
+from ..logging.logger import get_logger
 
 try:
     import cudf
@@ -17,6 +20,17 @@ try:
     CUML_AVAILABLE = True
 except ImportError:
     CUML_AVAILABLE = False
+
+logger = get_logger(__name__)
+
+
+def _shape_or_none(X) -> Optional[tuple]:
+    if hasattr(X, "shape"):
+        try:
+            return tuple(X.shape)
+        except Exception:
+            return None
+    return None
 
 
 def to_gpu_if_needed(
@@ -36,20 +50,27 @@ def to_gpu_if_needed(
         GPU data (cuDF DataFrame) or original data
     """
     if not use_gpu or not CUDF_AVAILABLE:
+        logger.debug("GPU convert skip: use_gpu=%s cudf=%s shape=%s type=%s",
+                     use_gpu, CUDF_AVAILABLE, _shape_or_none(X), type(X).__name__)
         return X
     
     if isinstance(X, csr_matrix):
         if sparse_to_dense:
             X_dense = X.toarray()
+            logger.debug("GPU convert: sparse->dense for cuDF shape=%s", _shape_or_none(X_dense))
             return cudf.DataFrame(X_dense)
         else:
             # Keep sparse for now (some CUML models support sparse)
+            logger.debug("GPU convert: keeping sparse shape=%s", _shape_or_none(X))
             return X
     elif isinstance(X, np.ndarray):
         if not isinstance(X, cudf.DataFrame):
+            logger.debug("GPU convert: numpy->cuDF shape=%s", _shape_or_none(X))
             return cudf.DataFrame(X)
+        logger.debug("GPU convert: already cuDF shape=%s", _shape_or_none(X))
         return X
     else:
+        logger.debug("GPU convert: no-op for type=%s", type(X).__name__)
         return X
 
 
@@ -65,14 +86,31 @@ def from_gpu_if_needed(
     Returns:
         NumPy array
     """
-    if hasattr(result, 'values'):
-        # cuDF DataFrame
-        return result.values
-    elif hasattr(result, 'get'):
+    if sp.issparse(result):
+        logger.debug("GPU convert back: sparse passthrough shape=%s", _shape_or_none(result))
+        return result
+    if CUDF_AVAILABLE:
+        try:
+            import cudf
+            if isinstance(result, (cudf.DataFrame, cudf.Series)):
+                logger.debug("GPU convert back: cuDF->numpy shape=%s", _shape_or_none(result))
+                if hasattr(result, "to_numpy"):
+                    return result.to_numpy()
+                if hasattr(result, "values_host"):
+                    return result.values_host
+                return result.to_pandas().values
+        except Exception:
+            pass
+    if hasattr(result, 'get'):
         # cupy array
+        logger.debug("GPU convert back: cupy->numpy shape=%s", _shape_or_none(result))
         return result.get()
-    else:
-        return np.asarray(result)
+    if hasattr(result, 'values'):
+        # Fallback for dataframe/series
+        logger.debug("GPU convert back: values->numpy shape=%s", _shape_or_none(result))
+        return np.asarray(result.values)
+    logger.debug("GPU convert back: numpy.asarray type=%s shape=%s", type(result).__name__, _shape_or_none(result))
+    return np.asarray(result)
 
 
 def check_gpu_availability() -> bool:
@@ -88,4 +126,3 @@ def check_gpu_availability() -> bool:
     except Exception:
         # CUDA not available (login node, no GPU, driver mismatch, etc.)
         return False
-

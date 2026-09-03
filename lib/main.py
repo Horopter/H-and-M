@@ -58,11 +58,13 @@ def train_pipeline(config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, An
     except Exception as e:
         logger.warning(f"Could not initialize DuckDB reporter: {e}")
     
+    resume_from_stage = getattr(config, "resume_from_stage", None)
     # Run all stages
     results = pipeline.run_all_stages(
         experiment_name="main_experiment",
         mlflow_tracker=mlflow_tracker,
-        duckdb_reporter=duckdb_reporter
+        duckdb_reporter=duckdb_reporter,
+        resume_from_stage=resume_from_stage
     )
     
     logger.info("Stage-based training pipeline completed")
@@ -148,4 +150,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

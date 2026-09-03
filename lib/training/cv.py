@@ -12,6 +12,9 @@ from ..logging.logger import get_logger
 from ..data.splitter import TemporalSplitter
 from ..utils.validation import LeakageDetector
 from ..utils.parallel import ParallelExecutor
+from ..utils.gpu_utils import from_gpu_if_needed
+from ..utils.metrics_utils import select_positive_proba
+from ..utils.gc_utils import collect_after_operation
 
 logger = get_logger(__name__)
 
@@ -87,23 +90,36 @@ class CrossValidator:
                 y_subset = y
                 subset_indices = np.arange(len(y))
             else:
-                # Random stratified sampling for CV
-                indices = np.arange(len(y))
-                skf = StratifiedKFold(n_splits=1, shuffle=True, random_state=self.config.random_state)
-                train_idx, _ = next(skf.split(indices, y))
-                # Sample n_per_fold samples
-                np.random.seed(self.config.random_state)
-                sampled_idx = np.random.choice(train_idx, size=min(n_per_fold, len(train_idx)), replace=False)
-                subset_indices = sampled_idx
-                
-                X_subset = X[subset_indices] if hasattr(X, '__getitem__') else X
-                y_subset = y[subset_indices]
-                
-                self.logger.info(f"Sampled {len(subset_indices)} samples for CV (target was {n_per_fold})")
+                if n_per_fold >= len(y):
+                    X_subset = X
+                    y_subset = y
+                    subset_indices = np.arange(len(y))
+                else:
+                    # Random stratified sampling for CV
+                    indices = np.arange(len(y))
+                    subset_indices = None
+                    try:
+                        from sklearn.model_selection import train_test_split
+                        subset_indices, _ = train_test_split(
+                            indices,
+                            train_size=n_per_fold,
+                            stratify=y,
+                            random_state=self.config.random_state
+                        )
+                    except Exception as e:
+                        self.logger.warning("Stratified sampling failed (%s); using random subset", e)
+                        rng = np.random.default_rng(self.config.random_state)
+                        subset_indices = rng.choice(indices, size=n_per_fold, replace=False)
+                    
+                    X_subset = X[subset_indices] if hasattr(X, '__getitem__') else X
+                    y_subset = y[subset_indices]
+                    
+                    self.logger.info(f"Sampled {len(subset_indices)} samples for CV (target was {n_per_fold})")
         else:
             X_subset = X
             y_subset = y
             subset_indices = np.arange(len(y))
+        self._last_subset_indices = subset_indices
         
         # Always use stratified folds with random sampling (not temporal for CV)
         # For CV, we use random sampling, not temporal ordering
@@ -153,10 +169,18 @@ class CrossValidator:
         
         # Predict
         y_pred = model.predict(X_val)
+        y_pred = from_gpu_if_needed(y_pred)
         collect_after_operation("cv_model_predict", aggressive=True)
-        y_proba = model.predict_proba(X_val)[:, 1] if hasattr(model, 'predict_proba') else None
-        if y_proba is not None:
-            collect_after_operation("cv_model_predict_proba", aggressive=True)
+        y_proba = None
+        supports_proba = getattr(model, "probability", True)
+        if hasattr(model, 'predict_proba') and supports_proba:
+            try:
+                y_proba = model.predict_proba(X_val)
+                y_proba = from_gpu_if_needed(y_proba)
+                y_proba = select_positive_proba(model, y_proba, logger=self.logger)
+                collect_after_operation("cv_model_predict_proba", aggressive=True)
+            except Exception as e:
+                self.logger.warning("predict_proba failed; skipping ROC-AUC. error=%s", e)
         
         # Calculate metrics
         metrics = {
@@ -226,7 +250,10 @@ class CrossValidator:
         parallel: bool = False,
         model_params: Optional[Dict[str, Any]] = None,
         save_checkpoints: bool = False,
-        original_data_size: Optional[int] = None
+        original_data_size: Optional[int] = None,
+        checkpoint_tag: Optional[str] = None,
+        checkpoint_metadata: Optional[Dict[str, Any]] = None,
+        checkpoint_data: bool = False
     ) -> Dict[str, Any]:
         """
         Perform cross-validation.
@@ -291,13 +318,41 @@ class CrossValidator:
                     try:
                         from ..checkpointing.checkpoint_manager import CheckpointManager
                         checkpoint_mgr = CheckpointManager(self.config)
+                        model_type = model.__class__.__name__
+                        if checkpoint_tag:
+                            model_type = f"{model_type}/{checkpoint_tag}"
+                        metadata = {'fold_id': fold_id, 'metrics': metrics}
+                        if checkpoint_metadata:
+                            metadata.update(checkpoint_metadata)
                         checkpoint_mgr.save_checkpoint(
                             model,
-                            model.__class__.__name__,
+                            model_type,
                             fold_id=fold_id,
                             score=metrics.get('f1', 0),
-                            metadata={'fold_id': fold_id, 'metrics': metrics}
+                            metadata=metadata
                         )
+                        if checkpoint_metadata and 'params' in checkpoint_metadata:
+                            checkpoint_mgr.save_hyperparameters(
+                                checkpoint_metadata['params'],
+                                model_type,
+                                fold_id=fold_id
+                            )
+                        if checkpoint_data:
+                            subset_indices = getattr(self, "_last_subset_indices", None)
+                            train_idx_arr = np.asarray(train_idx)
+                            val_idx_arr = np.asarray(val_idx)
+                            state = {
+                                'fold_id': [fold_id],
+                                'train_size': [len(train_idx_arr)],
+                                'val_size': [len(val_idx_arr)],
+                                'subset_size': [subset_size],
+                                'original_data_size': [original_data_size if original_data_size is not None else len(y)],
+                                'train_idx': [train_idx_arr.tolist()],
+                                'val_idx': [val_idx_arr.tolist()]
+                            }
+                            if subset_indices is not None:
+                                state['subset_indices'] = [np.asarray(subset_indices).tolist()]
+                            checkpoint_mgr.save_training_state(state, model_type, fold_id=fold_id)
                     except Exception as e:
                         self.logger.warning(f"Failed to save checkpoint for fold {fold_id}: {e}")
                 
@@ -335,4 +390,3 @@ class CrossValidator:
         )
         
         return cv_results
-

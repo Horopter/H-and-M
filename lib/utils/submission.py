@@ -48,17 +48,28 @@ class SubmissionGenerator:
             output_path = Path(output_path)
             output_path.parent.mkdir(parents=True, exist_ok=True)
         
+        preds = np.asarray(predictions)
+        if not getattr(self.config, "submission_use_proba", True):
+            threshold = float(getattr(self.config, "submission_threshold", 0.5))
+            self.logger.info(
+                "Converting submission predictions to class labels using threshold=%.3f",
+                threshold
+            )
+            preds = (preds >= threshold).astype(int)
+
+        label_column = getattr(self.config, "label_column", "label")
+
         # Create submission DataFrame
         if test_ids is not None:
             submission_df = pl.DataFrame({
                 'id': test_ids,
-                'prediction': predictions
+                label_column: preds
             })
         else:
             # Use index as ID
             submission_df = pl.DataFrame({
-                'id': np.arange(len(predictions)),
-                'prediction': predictions
+                'id': np.arange(len(preds)),
+                label_column: preds
             })
         
         # Write CSV (ONLY CSV file in entire pipeline)
@@ -66,7 +77,10 @@ class SubmissionGenerator:
         
         self.logger.info(f"Submission file saved to {output_path}")
         self.logger.info(f"Submission shape: {submission_df.shape}")
-        self.logger.info(f"Predictions range: [{np.min(predictions):.4f}, {np.max(predictions):.4f}]")
+        if getattr(self.config, "submission_use_proba", True):
+            self.logger.info(f"Predictions range: [{np.min(preds):.4f}, {np.max(preds):.4f}]")
+        else:
+            unique, counts = np.unique(preds, return_counts=True)
+            self.logger.info("Label distribution: %s", dict(zip(unique.tolist(), counts.tolist())))
         
         return output_path
-

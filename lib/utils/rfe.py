@@ -14,7 +14,7 @@ except ImportError:
 
 from ..config import get_config
 from ..logging.logger import get_logger
-from ..utils.gc_utils import collect_after_chunk
+from ..utils.gc_utils import collect_after_chunk, collect_after_operation
 
 logger = get_logger(__name__)
 

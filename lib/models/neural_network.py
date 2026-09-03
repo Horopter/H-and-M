@@ -15,6 +15,14 @@ try:
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False
+try:
+    from tqdm import tqdm
+    TQDM_AVAILABLE = True
+except ImportError:
+    TQDM_AVAILABLE = False
+
+    def tqdm(iterable=None, **kwargs):
+        return iterable if iterable is not None else range(0)
 
 from .base import BaseModel
 from ..config import get_config
@@ -179,7 +187,19 @@ class NeuralNetworkModel(BaseModel):
         patience_counter = 0
         accumulation_steps = getattr(self.config, 'gradient_accumulation_steps', 4) if hasattr(self, 'config') else 4
         
-        for epoch in range(self.epochs):
+        epoch_iter = range(self.epochs)
+        if TQDM_AVAILABLE:
+            epoch_iter = tqdm(
+                epoch_iter,
+                desc="NN epochs",
+                ascii=True,
+                mininterval=30,
+                leave=False
+            )
+        else:
+            self.logger.warning("tqdm not available; epoch progress disabled")
+
+        for epoch in epoch_iter:
             self.model.train()
             epoch_loss = 0.0
             self.optimizer.zero_grad()
@@ -215,6 +235,8 @@ class NeuralNetworkModel(BaseModel):
                     collect_after_operation("batch_processing", aggressive=True)
             
             avg_loss = epoch_loss / len(dataloader)
+            if TQDM_AVAILABLE and hasattr(epoch_iter, "set_postfix"):
+                epoch_iter.set_postfix(loss=f"{avg_loss:.4f}")
             
             if (epoch + 1) % 10 == 0:
                 self.logger.info(f"Epoch {epoch+1}/{self.epochs}, Loss: {avg_loss:.4f}")
@@ -346,4 +368,3 @@ class NeuralNetworkModel(BaseModel):
         
         logger.info("Model loaded")
         return model
-

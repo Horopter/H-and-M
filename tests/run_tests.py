@@ -29,7 +29,14 @@ def run_all_tests():
         'tests.test_gpu_fallback',
         'tests.test_models',
         'tests.test_validation',
-        'tests.test_integration'
+        'tests.test_integration',
+        'tests.test_import_validation',
+        'tests.test_stage_pipeline_comprehensive',
+        'tests.test_embeddings_comprehensive',
+        'tests.test_rfe_comprehensive',
+        'tests.test_cv_comprehensive',
+        'tests.test_loader_comprehensive',
+        'tests.test_neural_network_comprehensive'
     ]
     
     for module_name in test_modules:

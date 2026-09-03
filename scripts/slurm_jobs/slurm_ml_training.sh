@@ -46,6 +46,14 @@ export PIP_CACHE_DIR="$PWD/.pip-cache"
 export WORK_DIR="${SLURM_TMPDIR:-$PWD}"
 export ORIG_DIR="${SLURM_SUBMIT_DIR:-$PWD}"
 export VENV_DIR="$ORIG_DIR/venv"
+export ML_IMPORT_TIMEOUT="${ML_IMPORT_TIMEOUT:-30}"
+export ML_INSTALL_GPU_DEPS="${ML_INSTALL_GPU_DEPS:-false}"
+export ML_INSTALL_NLP_DEPS="${ML_INSTALL_NLP_DEPS:-false}"
+export ML_INSTALL_TORCH_DEPS="${ML_INSTALL_TORCH_DEPS:-false}"
+export VERIFY_ARROW_OUTPUTS="${VERIFY_ARROW_OUTPUTS:-true}"
+export VERIFY_ARROW_STRICT="${VERIFY_ARROW_STRICT:-true}"
+export VERIFY_ARROW_STRICT_PRE="${VERIFY_ARROW_STRICT_PRE:-false}"
+export VERIFY_ARROW_JSONL="${VERIFY_ARROW_JSONL:-}"
 
 # ============================================================================
 # Logging Functions
@@ -55,6 +63,51 @@ log() {
     echo "$@" >&1
     echo "$@" >&2
     sync 2>/dev/null || true
+}
+
+is_truthy() {
+    case "${1:-}" in
+        true|1|yes|y|on) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+verify_arrow_outputs() {
+    local phase="${1:-pre}"
+    if ! is_truthy "$VERIFY_ARROW_OUTPUTS"; then
+        log "Arrow verification disabled (VERIFY_ARROW_OUTPUTS=$VERIFY_ARROW_OUTPUTS)"
+        return 0
+    fi
+    local verify_script="$ORIG_DIR/scripts/verify_arrow_outputs.py"
+    if [ ! -f "$verify_script" ]; then
+        log "⚠ WARNING: Arrow verification script not found: $verify_script"
+        return 0
+    fi
+    local verify_args=("$PYTHON_CMD" -u "$verify_script" --data-dir "$DATA_DIR" --arrow-dir "$ORIG_DIR/outputs/arrow_data")
+    if [ -n "$VERIFY_ARROW_JSONL" ]; then
+        verify_args+=(--jsonl "$VERIFY_ARROW_JSONL")
+    fi
+    if [ "$phase" = "pre-run" ]; then
+        if is_truthy "$VERIFY_ARROW_STRICT_PRE"; then
+            verify_args+=(--strict)
+        fi
+    else
+        if is_truthy "$VERIFY_ARROW_STRICT"; then
+            verify_args+=(--strict)
+        fi
+    fi
+    log "Running Arrow output verification ($phase)..."
+    if "${verify_args[@]}" 2>&1 | tee -a "$LOG_FILE"; then
+        log "✓ Arrow output verification passed ($phase)"
+    else
+        local verify_exit=${PIPESTATUS[0]}
+        log "✗ ERROR: Arrow output verification failed ($phase, exit code: $verify_exit)"
+        if is_truthy "$VERIFY_ARROW_STRICT"; then
+            exit "$verify_exit"
+        else
+            log "Continuing despite verification failure (VERIFY_ARROW_STRICT=$VERIFY_ARROW_STRICT)"
+        fi
+    fi
 }
 
 # ============================================================================
@@ -71,12 +124,45 @@ fi
 source "$VENV_DIR/bin/activate"
 export VIRTUAL_ENV_DISABLE_PROMPT=1
 
+# Optional: install GPU deps into venv (cuml/cudf/torch) when requested.
+if [ "$ML_INSTALL_GPU_DEPS" = "true" ] || [ "$ML_INSTALL_GPU_DEPS" = "1" ] || [ "$ML_INSTALL_GPU_DEPS" = "yes" ]; then
+    GPU_INSTALL_SCRIPT="$ORIG_DIR/scripts/install_cuml.sh"
+    if [ -f "$GPU_INSTALL_SCRIPT" ]; then
+        log "Installing GPU dependencies into venv (ML_INSTALL_GPU_DEPS=true)..."
+        bash "$GPU_INSTALL_SCRIPT" || log "⚠ WARNING: GPU dependency install failed; continuing with CPU fallback"
+    else
+        log "⚠ WARNING: GPU install script not found: $GPU_INSTALL_SCRIPT"
+    fi
+fi
+
+# Optional: install torch into venv when requested (needed for BERT/transformers).
+if [ "$ML_INSTALL_TORCH_DEPS" = "true" ] || [ "$ML_INSTALL_TORCH_DEPS" = "1" ] || [ "$ML_INSTALL_TORCH_DEPS" = "yes" ]; then
+    TORCH_REQS="$ORIG_DIR/requirements-torch.txt"
+    if [ -f "$TORCH_REQS" ]; then
+        log "Installing Torch dependencies into venv (ML_INSTALL_TORCH_DEPS=true)..."
+        python3 -m pip install --no-cache-dir -r "$TORCH_REQS" || log "⚠ WARNING: Torch dependency install failed; continuing without it"
+    else
+        log "⚠ WARNING: Torch requirements not found: $TORCH_REQS"
+    fi
+fi
+
+# Optional: install NLP deps into venv (transformers, sentence-transformers) when requested.
+if [ "$ML_INSTALL_NLP_DEPS" = "true" ] || [ "$ML_INSTALL_NLP_DEPS" = "1" ] || [ "$ML_INSTALL_NLP_DEPS" = "yes" ]; then
+    NLP_REQS="$ORIG_DIR/requirements-nlp.txt"
+    if [ -f "$NLP_REQS" ]; then
+        log "Installing NLP dependencies into venv (ML_INSTALL_NLP_DEPS=true)..."
+        python3 -m pip install --no-cache-dir -r "$NLP_REQS" || log "⚠ WARNING: NLP dependency install failed; continuing without them"
+    else
+        log "⚠ WARNING: NLP requirements not found: $NLP_REQS"
+    fi
+fi
+
 # ============================================================================
 # Environment Variables
 # ============================================================================
 
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
-export PYTORCH_ALLOC_CONF="expandable_segments:true,max_split_size_mb:512"
+export PYTORCH_ALLOC_CONF="expandable_segments:True,max_split_size_mb:512"
 export TOKENIZERS_PARALLELISM=false
 export PYTHONUNBUFFERED=1
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
@@ -131,7 +217,7 @@ done
 
 # Optional packages (warn if missing, but DO NOT fail)
 # NOTE: CUML/cudf are notoriously difficult to install - graceful fallback to CPU
-OPTIONAL_PACKAGES=("cuml" "cudf" "xgboost" "torch" "mlflow" "duckdb" "umap-learn" "statsmodels")
+OPTIONAL_PACKAGES=("cuml" "cudf" "xgboost" "torch" "mlflow" "duckdb" "umap-learn" "statsmodels" "transformers" "sentence-transformers")
 
 for pkg in "${OPTIONAL_PACKAGES[@]}"; do
     case "$pkg" in
@@ -144,15 +230,20 @@ for pkg in "${OPTIONAL_PACKAGES[@]}"; do
             ;;
         "cuml"|"cudf")
             # CUML/cudf are optional - CPU fallback available
-            if ! python3 -c "import ${pkg}" 2>/dev/null; then
-                log "⚠ INFO: $pkg not found (will use CPU fallback - this is OK)"
-            else
+            if timeout "$ML_IMPORT_TIMEOUT" python3 -c "import ${pkg}" 2>/dev/null; then
                 log "✓ $pkg found (GPU acceleration enabled)"
+            else
+                EXIT_CODE=$?
+                if [ $EXIT_CODE -eq 124 ]; then
+                    log "⚠ WARNING: $pkg import timed out (may be slow to load)"
+                else
+                    log "⚠ INFO: $pkg not found (will use CPU fallback - this is OK)"
+                fi
             fi
             ;;
         *)
             # Use timeout to prevent hanging, and catch core dumps
-            if timeout 10 python3 -c "import ${pkg//-/_}" 2>/dev/null; then
+            if timeout "$ML_IMPORT_TIMEOUT" python3 -c "import ${pkg//-/_}" 2>/dev/null; then
                 log "✓ $pkg found"
             else
                 EXIT_CODE=$?
@@ -262,6 +353,9 @@ else
     log "  Skipping pre-flight validation"
 fi
 
+# Pre-flight Arrow verification (checks existing outputs if present)
+verify_arrow_outputs "pre-run"
+
 # ============================================================================
 # Pipeline Execution
 # ============================================================================
@@ -279,12 +373,16 @@ EXPERIMENT_NAME="${ML_EXPERIMENT_NAME:-}"
 MLFLOW_URI="${MLFLOW_TRACKING_URI:-}"
 DUCKDB_PATH="${ML_DUCKDB_PATH:-results.duckdb}"
 RUN_STATS="${ML_RUN_STATS:-true}"
+RESUME_FROM_STAGE="${ML_RESUME_FROM_STAGE:-}"
 
 log "Models: $MODELS"
 log "CV Folds: $CV_FOLDS (stratified)"
 log "Subset Size: $SUBSET_SIZE"
 log "Use GPU: $USE_GPU"
 log "Run Stats: $RUN_STATS"
+if [ -n "$RESUME_FROM_STAGE" ]; then
+    log "Resume From Stage: $RESUME_FROM_STAGE"
+fi
 
 PIPELINE_START=$(date +%s)
 # PYTHON_CMD and LOG_FILE already defined above (before validation section)
@@ -307,6 +405,11 @@ if [ -n "$MLFLOW_URI" ]; then
     MLFLOW_FLAG="--mlflow-tracking-uri $MLFLOW_URI"
 fi
 
+RESUME_FLAG=""
+if [ -n "$RESUME_FROM_STAGE" ]; then
+    RESUME_FLAG="--resume-from-stage $RESUME_FROM_STAGE"
+fi
+
 log "Running training pipeline..."
 log "Log file: $LOG_FILE"
 
@@ -321,6 +424,7 @@ if "$PYTHON_CMD" -u "$ORIG_DIR/src/run_training_pipeline.py" \
     --duckdb-path "$DUCKDB_PATH" \
     $GPU_FLAG \
     $STATS_FLAG \
+    ${RESUME_FLAG:+$RESUME_FLAG} \
     ${EXPERIMENT_NAME:+--experiment-name "$EXPERIMENT_NAME"} \
     ${MLFLOW_FLAG:+$MLFLOW_FLAG} \
     2>&1 | tee "$LOG_FILE"; then
@@ -330,6 +434,7 @@ if "$PYTHON_CMD" -u "$ORIG_DIR/src/run_training_pipeline.py" \
     log "✓ Training pipeline completed successfully in ${PIPELINE_DURATION}s ($((${PIPELINE_DURATION} / 60)) minutes)"
     log "Results saved to: $ORIG_DIR/outputs"
     log "DuckDB database: $ORIG_DIR/$DUCKDB_PATH"
+    verify_arrow_outputs "post-run"
 else
     PIPELINE_END=$(date +%s)
     PIPELINE_DURATION=$((PIPELINE_END - PIPELINE_START))
@@ -355,4 +460,3 @@ log "Output directory: $ORIG_DIR/outputs"
 log "DuckDB database: $ORIG_DIR/$DUCKDB_PATH"
 log "Log file: $LOG_FILE"
 log "============================================================"
-

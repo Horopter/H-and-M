@@ -8,7 +8,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from typing import Dict, List, Any, Optional, Union
 from pathlib import Path
-from scipy.sparse import csr_matrix
+from scipy.sparse import csr_matrix, issparse
 
 from ..config import get_config
 from ..logging.logger import get_logger
@@ -59,8 +59,17 @@ class ArrowStorage:
         self.logger.debug(f"Saved array {name} to {save_path}")
         return save_path
     
-    def save_sparse_matrix(self, matrix: csr_matrix, name: str, stage: str = "general"):
+    def save_sparse_matrix(self, matrix: Union[csr_matrix, np.ndarray], name: str, stage: str = "general"):
         """Save sparse matrix as Parquet."""
+        if matrix is None:
+            raise ValueError(f"Cannot save empty matrix for {name}")
+        if not issparse(matrix):
+            try:
+                matrix = csr_matrix(matrix)
+                self.logger.info("Converted dense matrix to CSR for %s", name)
+            except Exception as e:
+                raise TypeError(f"Expected sparse matrix for {name}, got {type(matrix)}") from e
+        
         # Convert to COO format for easier storage
         coo = matrix.tocoo()
         
@@ -132,6 +141,66 @@ class ArrowStorage:
         
         return None
     
+    def save_embeddings(self, embeddings: Dict[str, np.ndarray], name: str, stage: str = "general"):
+        """Save embeddings dictionary as Parquet files."""
+        saved_paths = {}
+        for emb_type, emb_array in embeddings.items():
+            save_path = self.save_numpy_array(emb_array, f"{name}_{emb_type}", stage)
+            saved_paths[emb_type] = save_path
+            self.logger.info(f"Saved {emb_type} embeddings to {save_path}")
+        return saved_paths
+    
+    def load_embeddings(self, name: str, stage: str = "general", emb_types: Optional[List[str]] = None) -> Optional[Dict[str, np.ndarray]]:
+        """Load embeddings from Parquet files."""
+        embeddings = {}
+        stage_dir = self.storage_dir / stage
+        
+        if not stage_dir.exists():
+            return None
+        
+        # If emb_types not specified, try to find all matching files
+        if emb_types is None:
+            pattern = f"{name}_*.parquet"
+            files = list(stage_dir.glob(pattern))
+            emb_types = [f.stem.replace(f"{name}_", "") for f in files]
+        
+        for emb_type in emb_types:
+            emb_path = stage_dir / f"{name}_{emb_type}.parquet"
+            if emb_path.exists():
+                try:
+                    df = pl.read_parquet(str(emb_path))
+                    # Filter out metadata columns
+                    data_columns = [c for c in df.columns if not c.startswith("_meta_")]
+                    if len(data_columns) == 1:
+                        array = df[data_columns[0]].to_numpy()
+                    else:
+                        # Multi-column array - stack columns
+                        array = df.select(data_columns).to_numpy()
+                    embeddings[emb_type] = array
+                    self.logger.info(f"Loaded {emb_type} embeddings from {emb_path} (shape: {array.shape})")
+                except Exception as e:
+                    self.logger.warning(f"Could not load {emb_type} embeddings from {emb_path}: {e}")
+        
+        return embeddings if embeddings else None
+    
+    def embeddings_exist(self, name: str, stage: str = "general", emb_types: Optional[List[str]] = None) -> bool:
+        """Check if embeddings exist."""
+        stage_dir = self.storage_dir / stage
+        if not stage_dir.exists():
+            return False
+        
+        if emb_types is None:
+            # Check for any embedding files with this name
+            pattern = f"{name}_*.parquet"
+            return len(list(stage_dir.glob(pattern))) > 0
+        
+        # Check for specific embedding types
+        for emb_type in emb_types:
+            emb_path = stage_dir / f"{name}_{emb_type}.parquet"
+            if not emb_path.exists():
+                return False
+        return True
+    
     def _flatten_dict(self, d: Dict[str, Any], parent_key: str = '', sep: str = '_') -> Dict[str, Any]:
         """Flatten nested dictionary."""
         items = []
@@ -180,4 +249,3 @@ class ArrowStorage:
             return csr_matrix((data, (row, col)), shape=(shape_0, shape_1))
         
         return None
-
